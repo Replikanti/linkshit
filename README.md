@@ -15,26 +15,20 @@ point it at the Anthropic API, Ollama, or anything else.
 
 ## How it works
 
-```
-┌──────────────────────────────────────┐
-│ Chrome (own MV3 extension)           │
-│  - auto-scroll the feed (jittered)   │
-│  - capture posts as they render      │
-│  - dedupe via IndexedDB              │
-│  - pre-filter (keywords / authors)   │
-│  - render top hits in side panel     │
-└──────────────────┬───────────────────┘
-                   │ POST /score
-                   ▼
-┌──────────────────────────────────────┐
-│ Local Node bridge  (score-server.js) │
-│  - spawns `claude -p` by default     │
-│  - swap runLLM() for any other LLM   │
-└──────────────────┬───────────────────┘
-                   │
-                   ▼
-            Claude Code CLI
-       (Pro/Max OAuth — no API key)
+```mermaid
+flowchart TD
+    subgraph Browser["Browser (your logged-in Chrome)"]
+        Ext["Chrome MV3 extension<br/>auto-scroll · capture · dedupe<br/>pre-filter · render hits"]
+    end
+    subgraph Local["Localhost"]
+        Bridge["score-server.js<br/>:7777 · auth-gated<br/>runLLM() swap point"]
+        CC["Claude Code CLI<br/>claude -p"]
+    end
+    Anthropic[("Anthropic<br/>Pro/Max account")]
+
+    Ext -->|"POST /score<br/>X-Linkshit-Token"| Bridge
+    Bridge -->|"spawns"| CC
+    CC -->|"OAuth"| Anthropic
 ```
 
 Two pieces:
