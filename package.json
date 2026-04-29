@@ -8,7 +8,9 @@
     "check": "node --check score-server.js && node --check content.js",
     "validate": "node -e \"['manifest.json','package.json'].forEach(f => JSON.parse(require('fs').readFileSync(f,'utf8')))\"",
     "lint": "eslint .",
-    "pack": "node scripts/pack.js"
+    "pack": "node scripts/pack.js",
+    "smoke": "node scripts/smoke-server.js",
+    "audit": "npm audit --audit-level=high"
   },
   "engines": {
     "node": ">=18"
