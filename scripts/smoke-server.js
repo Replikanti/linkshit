@@ -9,15 +9,22 @@ const path = require('node:path');
 const PORT = '7780';
 const TOKEN = 'smoketok';
 
-const stubPath = path.join(os.tmpdir(), `linkshit-stub-${process.pid}.sh`);
+// `fs.mkdtempSync` atomically creates a unique directory in /tmp owned only
+// by us, so writing the stub inside it is not vulnerable to a TOCTOU /
+// symlink-swap attack on a predictable temp path.
+const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linkshit-smoke-'));
+const stubPath = path.join(stubDir, 'stub-claude.sh');
 fs.writeFileSync(
   stubPath,
   '#!/bin/bash\necho \'[{"id":1,"score":5,"reason":"stub"}]\'\n',
   { mode: 0o755 },
 );
 
+// Use `process.execPath` (the absolute path of the node binary running this
+// script) instead of relying on $PATH lookup for "node". Avoids the security
+// rule about world-writable PATH directories shadowing a known command.
 const proc = spawn(
-  'node',
+  process.execPath,
   ['score-server.js'],
   {
     env: { ...process.env, LINKSHIT_TOKEN: TOKEN, PORT, CLAUDE_BIN: stubPath },
@@ -33,7 +40,7 @@ proc.stderr.on('data', d => { serverErr += d; });
 
 const cleanup = () => {
   try { proc.kill('SIGTERM'); } catch { /* already gone */ }
-  try { fs.unlinkSync(stubPath); } catch { /* already gone */ }
+  try { fs.rmSync(stubDir, { recursive: true, force: true }); } catch { /* already gone */ }
 };
 
 const fail = msg => {
