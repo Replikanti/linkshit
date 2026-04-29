@@ -30,6 +30,7 @@
     batchSize: 8,
     maxPosts: 1500,
     serverUrl: 'http://127.0.0.1:7777/score',
+    serverToken: '',
   };
   const CFG = {};
   for (const k of Object.keys(DEFAULTS)) {
@@ -126,9 +127,11 @@
 
   // ---------- Score via local bridge ----------
   async function scoreBatch(posts) {
+    const headers = { 'content-type': 'application/json' };
+    if (CFG.serverToken) headers['x-linkshit-token'] = CFG.serverToken;
     const r = await fetch(CFG.serverUrl, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify({ criteria: CFG.criteria, posts }),
     });
     if (!r.ok) throw new Error('server ' + r.status + ': ' + (await r.text()).slice(0, 200));
@@ -141,8 +144,14 @@
 
   const queue = [];
   let scoring = false;
+  // Sticky force flag: if Stop/end-of-feed asks for a flush while a batch is
+  // already in flight, we still want to drain the remainder once the batch
+  // completes — even if it's smaller than batchSize.
+  let pendingForce = false;
   async function maybeFlush(force = false) {
-    if (scoring || !queue.length || (!force && queue.length < CFG.batchSize)) return;
+    if (force) pendingForce = true;
+    if (scoring || queue.length === 0) return;
+    if (queue.length < CFG.batchSize && !pendingForce) return;
     scoring = true;
     const batch = queue.splice(0, CFG.batchSize);
     ui.setStatus(`Scoring ${batch.length} (${queue.length} queued)…`);
@@ -161,7 +170,10 @@
       await sleep(15000);
     } finally {
       scoring = false;
-      if (queue.length >= CFG.batchSize) maybeFlush();
+      if (queue.length === 0) pendingForce = false;
+      if (queue.length >= CFG.batchSize || (pendingForce && queue.length > 0)) {
+        maybeFlush();
+      }
     }
   }
 
@@ -282,6 +294,7 @@
       <div class="body" id="lks-body"></div>
       <div class="body" id="lks-settings" style="display:none;border-top:1px solid #eee;">
         <label>Local server URL</label><input id="s-serverUrl"/>
+        <label>Server token (printed by score-server.js on start)</label><input id="s-serverToken" type="password"/>
         <label>Criteria</label><textarea id="s-criteria" rows="5"></textarea>
         <label>Pre-filter keywords (comma-separated)</label><input id="s-keywords"/>
         <label>Author allowlist (comma-separated substrings)</label><input id="s-authors"/>
@@ -297,9 +310,13 @@
     document.body.appendChild(panel);
     const $ = id => panel.querySelector('#' + id);
     const counters = { captured: 0, queued: 0, scored: 0, hits: 0 };
+    // Track URNs already rendered in the panel so the boot replay + later
+    // scroll-into-view of the same post don't produce duplicate rows.
+    const rendered = new Set();
 
     const sync = () => {
       $('s-serverUrl').value = CFG.serverUrl;
+      $('s-serverToken').value = CFG.serverToken;
       $('s-criteria').value = CFG.criteria;
       $('s-keywords').value = CFG.keywords.join(', ');
       $('s-authors').value = CFG.authors.join(', ');
@@ -320,6 +337,7 @@
     };
     $('s-save').onclick = () => {
       SAVE('serverUrl', $('s-serverUrl').value.trim() || DEFAULTS.serverUrl);
+      SAVE('serverToken', $('s-serverToken').value.trim());
       SAVE('criteria', $('s-criteria').value);
       SAVE('keywords', $('s-keywords').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('authors', $('s-authors').value.split(',').map(s => s.trim()).filter(Boolean));
@@ -337,7 +355,14 @@
       const db = await dbReady;
       db.transaction(STORE, 'readwrite').objectStore(STORE).clear();
       $('lks-body').innerHTML = '';
-      counters.hits = 0; $('lks-c-hits').textContent = '0';
+      seen.clear();
+      queue.length = 0;
+      rendered.clear();
+      for (const k of Object.keys(counters)) {
+        counters[k] = 0;
+        const el = $('lks-c-' + k);
+        if (el) el.textContent = '0';
+      }
       setStatus('DB cleared.');
     };
 
@@ -348,6 +373,8 @@
       if (el) el.textContent = counters[name];
     }
     function addResult(post) {
+      if (rendered.has(post.urn)) return;
+      rendered.add(post.urn);
       bump('hits', 1);
       const div = document.createElement('div');
       div.className = 'result';
