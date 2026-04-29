@@ -1,5 +1,7 @@
 # Linkshit
 
+[![CI](https://github.com/Replikanti/linkshit/actions/workflows/ci.yml/badge.svg)](https://github.com/Replikanti/linkshit/actions/workflows/ci.yml)
+
 > Your LinkedIn feed is shit. Linkshit reads it for you.
 
 Auto-scrolls your LinkedIn feed, extracts every post that loads, scores each
@@ -231,7 +233,22 @@ The browser-side code never changes.
 - `manifest.json` — Chrome MV3 extension manifest
 - `content.js` — extension content script (UI + scroll + extract + dedupe)
 - `score-server.js` — Node localhost bridge; `runLLM` is the swap point
-- `package.json` — Node metadata (no dependencies; built-ins only)
+- `package.json` — Node metadata (runtime has no deps; dev tooling only)
+- `eslint.config.mjs` — ESLint flat config
+- `.github/workflows/ci.yml` — CI pipeline (validate / check / lint / pack)
+
+## Development
+
+```bash
+npm install        # installs dev tooling (eslint, web-ext)
+npm run check      # node --check on the JS files
+npm run validate   # JSON files parse
+npm run lint       # eslint
+npm run pack       # builds web-ext-artifacts/linkshit-<version>.zip
+```
+
+CI runs all four on every push and PR, then uploads the packed extension as
+a build artifact.
 
 ## License
 

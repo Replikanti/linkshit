@@ -4,11 +4,21 @@
   "description": "Linkshit — auto-scroll your LinkedIn feed and surface posts matching your criteria via a local LLM.",
   "main": "score-server.js",
   "scripts": {
-    "start": "node score-server.js"
+    "start": "node score-server.js",
+    "check": "node --check score-server.js && node --check content.js",
+    "validate": "node -e \"['manifest.json','package.json'].forEach(f => JSON.parse(require('fs').readFileSync(f,'utf8')))\"",
+    "lint": "eslint .",
+    "pack": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files README.md score-server.js package.json package-lock.json eslint.config.mjs LICENSE web-ext-artifacts/** node_modules/** .github/** .git/** .gitignore"
   },
   "engines": {
     "node": ">=18"
   },
   "license": "MIT",
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "eslint": "^9.20.0",
+    "globals": "^15.14.0",
+    "web-ext": "^8.3.0"
+  }
 }
