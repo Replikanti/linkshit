@@ -357,6 +357,7 @@
       $('lks-body').innerHTML = '';
       seen.clear();
       queue.length = 0;
+      pendingForce = false;
       rendered.clear();
       for (const k of Object.keys(counters)) {
         counters[k] = 0;
