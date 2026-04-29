@@ -43,10 +43,14 @@ const cleanup = () => {
   try { fs.rmSync(stubDir, { recursive: true, force: true }); } catch { /* already gone */ }
 };
 
+// Sonar S5145 (log injection) on the two server-output lines is a false
+// positive here: this is a CI smoke script printing a child process's own
+// stdout/stderr to the runner's stderr for diagnostic purposes — there is
+// no log-analyzer downstream that could be fooled by CRLF injection.
 const fail = msg => {
-  console.error('SMOKE FAIL:', msg);
-  if (serverOut) console.error('--- server stdout ---\n' + serverOut);
-  if (serverErr) console.error('--- server stderr ---\n' + serverErr);
+  console.error('SMOKE FAIL:', msg); // NOSONAR
+  if (serverOut) console.error('--- server stdout ---\n' + serverOut); // NOSONAR
+  if (serverErr) console.error('--- server stderr ---\n' + serverErr); // NOSONAR
   cleanup();
   process.exit(1);
 };
