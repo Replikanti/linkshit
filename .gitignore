@@ -43,6 +43,7 @@ jspm_packages/
 
 # web-ext build output
 web-ext-artifacts/
+dist/
 
 # Snowpack dependency directory (https://snowpack.dev/)
 web_modules/

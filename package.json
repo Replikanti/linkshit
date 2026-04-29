@@ -8,7 +8,7 @@
     "check": "node --check score-server.js && node --check content.js",
     "validate": "node -e \"['manifest.json','package.json'].forEach(f => JSON.parse(require('fs').readFileSync(f,'utf8')))\"",
     "lint": "eslint .",
-    "pack": "web-ext build --source-dir . --artifacts-dir web-ext-artifacts --overwrite-dest --ignore-files README.md score-server.js package.json package-lock.json eslint.config.mjs LICENSE web-ext-artifacts/** node_modules/** .github/** .git/** .gitignore"
+    "pack": "node scripts/pack.js"
   },
   "engines": {
     "node": ">=18"

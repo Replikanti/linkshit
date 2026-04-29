@@ -36,4 +36,11 @@ export default [
       globals: { ...globals.node, crypto: 'off' },
     },
   },
+  {
+    files: ['scripts/**/*.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: globals.node,
+    },
+  },
 ];
