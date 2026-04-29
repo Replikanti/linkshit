@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Linkshit",
+  "version": "0.1.0",
+  "description": "Linkshit — auto-scroll your LinkedIn feed and surface posts matching your criteria via a local LLM.",
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/feed/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "http://127.0.0.1:7777/*"
+  ]
+}

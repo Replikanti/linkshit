@@ -1,0 +1,14 @@
+{
+  "name": "linkshit",
+  "version": "0.1.0",
+  "description": "Linkshit — auto-scroll your LinkedIn feed and surface posts matching your criteria via a local LLM.",
+  "main": "score-server.js",
+  "scripts": {
+    "start": "node score-server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "private": true
+}
