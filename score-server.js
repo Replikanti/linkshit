@@ -9,11 +9,11 @@
 // quota rather than from API tokens. To use a different backend, replace the
 // body of runLLM() — that is the only swap point.
 
-const http = require('http');
-const crypto = require('crypto');
-const { spawn } = require('child_process');
+const http = require('node:http');
+const crypto = require('node:crypto');
+const { spawn } = require('node:child_process');
 
-const PORT = parseInt(process.env.PORT || '7777', 10);
+const PORT = Number.parseInt(process.env.PORT || '7777', 10);
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const MODEL = process.env.CLAUDE_MODEL || 'haiku';
 // Shared secret. Without it, any tab the user visits could POST to the

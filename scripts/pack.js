@@ -7,9 +7,9 @@
 // Any new file added to the repo root has to be explicitly added to
 // EXTENSION_FILES below to ship.
 
-const fs = require('fs');
-const path = require('path');
-const { spawnSync } = require('child_process');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 
 const EXTENSION_FILES = ['manifest.json', 'content.js'];
 const STAGE_DIR = path.resolve(__dirname, '..', 'dist');

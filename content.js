@@ -66,32 +66,46 @@
     r.onsuccess = e => res(e.target.result);
     r.onerror = e => rej(e.target.error);
   });
-  const dbPut = post => dbReady.then(db => new Promise((res, rej) => {
-    const tx = db.transaction(STORE, 'readwrite');
-    tx.objectStore(STORE).put(post);
+  // IDB callback → Promise wrappers. Extracted so dbPut / dbGet / dbAllScored
+  // stay flat instead of nesting `.then(db => new Promise((res, rej) => { ... }))`
+  // four levels deep.
+  const txDone = tx => new Promise((res, rej) => {
     tx.oncomplete = res;
     tx.onerror = () => rej(tx.error);
-  }));
-  const dbGet = urn => dbReady.then(db => new Promise((res, rej) => {
-    const r = db.transaction(STORE, 'readonly').objectStore(STORE).get(urn);
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
-  }));
-  const dbAllScored = min => dbReady.then(db => new Promise(res => {
+  });
+  const reqDone = req => new Promise((res, rej) => {
+    req.onsuccess = () => res(req.result);
+    req.onerror = () => rej(req.error);
+  });
+  const cursorAll = (idx, range) => new Promise(res => {
     const out = [];
-    db.transaction(STORE, 'readonly').objectStore(STORE).index('score')
-      .openCursor(IDBKeyRange.lowerBound(min), 'prev').onsuccess = e => {
-        const c = e.target.result;
-        if (c) { out.push(c.value); c.continue(); } else res(out);
-      };
-  }));
+    idx.openCursor(range, 'prev').onsuccess = e => {
+      const c = e.target.result;
+      if (c) { out.push(c.value); c.continue(); } else res(out);
+    };
+  });
+  async function dbPut(post) {
+    const db = await dbReady;
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(post);
+    return txDone(tx);
+  }
+  async function dbGet(urn) {
+    const db = await dbReady;
+    return reqDone(db.transaction(STORE, 'readonly').objectStore(STORE).get(urn));
+  }
+  async function dbAllScored(min) {
+    const db = await dbReady;
+    const idx = db.transaction(STORE, 'readonly').objectStore(STORE).index('score');
+    return cursorAll(idx, IDBKeyRange.lowerBound(min));
+  }
 
   // ---------- Extractor ----------
   // LinkedIn rewrites these CSS class names occasionally. If captured count
   // stays at 0, open DevTools and find the new selectors.
   const firstLine = s => (s || '').trim().split('\n')[0].trim();
   function extractPost(el) {
-    const urn = el.getAttribute('data-urn') || el.getAttribute('data-id') || '';
+    const urn = el.dataset.urn || el.dataset.id || '';
     if (!urn.startsWith('urn:li:activity:')) return null;
     const authorEl =
       el.querySelector('.update-components-actor__title') ||
@@ -108,7 +122,7 @@
       author: firstLine(authorEl?.innerText),
       subtitle: firstLine(subtitleEl?.innerText),
       text: (textEl?.innerText || '').trim(),
-      reactions: reactEl ? parseInt(reactEl.innerText.replace(/\D/g, '') || '0', 10) : 0,
+      reactions: reactEl ? Number.parseInt(reactEl.innerText.replaceAll(/\D/g, '') || '0', 10) : 0,
       url: `https://www.linkedin.com/feed/update/${urn}/`,
       capturedAt: Date.now(),
       status: 'new',
@@ -138,7 +152,7 @@
     const arr = await r.json();
     return posts.map((p, i) => {
       const f = arr.find(x => x.id === i + 1) || arr[i] || { score: 0, reason: 'no-score' };
-      return { ...p, score: f.score | 0, reason: f.reason || '', status: 'scored' };
+      return { ...p, score: Math.trunc(f.score) || 0, reason: f.reason || '', status: 'scored' };
     });
   }
 
@@ -184,7 +198,7 @@
     if (!post || seen.has(post.urn)) return;
     seen.add(post.urn);
     const ex = await dbGet(post.urn);
-    if (ex && ex.status === 'scored') {
+    if (ex?.status === 'scored') {
       if (ex.score >= CFG.scoreThresh) ui.addResult(ex);
       return;
     }
@@ -270,7 +284,7 @@
   `;
   const styleEl = document.createElement('style');
   styleEl.textContent = STYLE;
-  document.head.appendChild(styleEl);
+  document.head.append(styleEl);
 
   const ui = (() => {
     const panel = document.createElement('div');
@@ -307,7 +321,7 @@
         <button id="s-save" class="primary">Save</button>
         <button id="s-clear">Clear DB</button>
       </div>`;
-    document.body.appendChild(panel);
+    document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
     const counters = { captured: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
@@ -341,12 +355,12 @@
       SAVE('criteria', $('s-criteria').value);
       SAVE('keywords', $('s-keywords').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('authors', $('s-authors').value.split(',').map(s => s.trim()).filter(Boolean));
-      SAVE('minReactions', parseInt($('s-minReactions').value) || 0);
-      SAVE('scoreThresh', parseInt($('s-scoreThresh').value) || 7);
-      SAVE('scrollMinMs', parseInt($('s-scrollMinMs').value) || 3000);
-      SAVE('scrollMaxMs', parseInt($('s-scrollMaxMs').value) || 6000);
-      SAVE('batchSize', parseInt($('s-batchSize').value) || 8);
-      SAVE('maxPosts', parseInt($('s-maxPosts').value) || 1500);
+      SAVE('minReactions', Number.parseInt($('s-minReactions').value, 10) || 0);
+      SAVE('scoreThresh', Number.parseInt($('s-scoreThresh').value, 10) || 7);
+      SAVE('scrollMinMs', Number.parseInt($('s-scrollMinMs').value, 10) || 3000);
+      SAVE('scrollMaxMs', Number.parseInt($('s-scrollMaxMs').value, 10) || 6000);
+      SAVE('batchSize', Number.parseInt($('s-batchSize').value, 10) || 8);
+      SAVE('maxPosts', Number.parseInt($('s-maxPosts').value, 10) || 1500);
       $('lks-settings').style.display = 'none';
       setStatus('Settings saved.');
     };
@@ -390,10 +404,10 @@
       div.querySelector('.snippet').textContent = post.text.slice(0, 240);
       div.querySelector('a').href = post.url;
       const body = $('lks-body');
-      const after = Array.from(body.children).find(
-        c => parseInt(c.querySelector('.score').textContent) < post.score
+      const after = [...body.children].find(
+        c => Number.parseInt(c.querySelector('.score').textContent, 10) < post.score
       );
-      if (after) body.insertBefore(div, after); else body.appendChild(div);
+      if (after) after.before(div); else body.append(div);
     }
     return { setStatus, bump, addResult };
   })();
