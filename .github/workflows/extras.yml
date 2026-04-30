@@ -49,6 +49,14 @@ jobs:
         # Chrome-targeted MV3 extension. Real ERRORS still fail.
         run: npx --no-install web-ext lint --source-dir dist --self-hosted
 
+  shellcheck:
+    name: shellcheck installer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: ShellCheck install.sh
+        run: shellcheck installers/install.sh
+
   links:
     name: Markdown link check
     runs-on: ubuntu-latest

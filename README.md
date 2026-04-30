@@ -14,10 +14,56 @@ Claude Pro/Max subscription (no API tokens, no per-call cost). Replace one
 function in `host.js` and you can point it at the Anthropic API, Ollama, or
 anything else.
 
-> **Heads-up.** A non-technical one-click installer is in the oven (issue
-> [#10](https://github.com/Replikanti/linkshit/issues/10), shipping with
-> v0.2.0). Until then the setup below is developer-grade — you write the
-> Chrome native messaging manifest once by hand.
+## Quick Start (5 minutes, no terminal commands to memorize)
+
+> Linux and macOS only. Windows is intentionally not supported.
+
+### 1. Run the installer
+
+Download `install.sh` from the [latest release](https://github.com/Replikanti/linkshit/releases/latest), then in a terminal:
+
+```bash
+bash ~/Downloads/install.sh
+```
+
+The installer will:
+
+1. Verify Node.js 22+ is installed (and tell you where to get it if not).
+2. Install the `claude` CLI globally (Claude Code; ships your Pro/Max OAuth login).
+3. Drop `host.js` into `~/.linkshit/`.
+4. Register Chrome's native messaging manifest in the right OS-specific path.
+
+If the script tells you to log in to Claude Code first, open a new terminal,
+run `claude`, finish the sign-in flow in your browser, type `/exit`, then
+re-run `install.sh`.
+
+### 2. Load the extension in Chrome
+
+Download `linkshit-extension-vX.Y.Z.zip` from the same release, unzip it
+somewhere stable (e.g. `~/Linkshit/`).
+
+Open `chrome://extensions` and turn **Developer mode** on (top right):
+
+![Step 1 — turn Developer mode on](docs/screenshots/01-extensions-dev-mode.svg)
+
+Then click **Load unpacked** and pick the unzipped folder:
+
+![Step 2 — Load unpacked, select folder](docs/screenshots/02-load-unpacked.svg)
+
+### 3. Use it
+
+Visit [`linkedin.com/feed`](https://www.linkedin.com/feed). A panel appears
+top-right. Click ⚙, set your **Criteria** (one or two sentences describing
+what's worth surfacing), Save, then **Start**.
+
+![The Linkshit panel on a LinkedIn feed page](docs/screenshots/03-panel-on-linkedin.svg)
+
+Hits stream in sorted by score. Click **Open on LinkedIn →** on any of them
+to jump to the post.
+
+> **Note on the screenshots above.** They are mockups, not real Chrome
+> captures — Linkshit's CI does not run a browser. Replace the SVGs in
+> `docs/screenshots/` with real PNGs whenever convenient.
 
 ## How it works
 
@@ -65,7 +111,10 @@ in `manifest.json`).
   complete the OAuth login).
 - **Google Chrome** (or Chromium-based browser with MV3 support).
 
-## Setup (manual, until v0.2.0 ships an installer)
+## Manual setup (developer-grade)
+
+If you'd rather skip `install.sh` (e.g. you cloned the repo and want to
+hack on it), here's what the installer does, broken out by step.
 
 ### 1. Clone the repo and install dev tooling
 
@@ -92,7 +141,6 @@ Pick the path for your OS:
 
 - **Linux:** `~/.config/google-chrome/NativeMessagingHosts/com.replikanti.linkshit.json`
 - **macOS:** `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.replikanti.linkshit.json`
-- **Windows:** registered via a registry key under `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.replikanti.linkshit` (see [Chrome docs](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging))
 
 Write this JSON (replacing `/full/path/to/host.js` with the absolute path
 to `host.js` in your clone):
@@ -223,7 +271,7 @@ The browser-side code never changes.
 | `Error: failed to connect to native host: …` | Same family — manifest exists but Chrome rejected it. Often the `allowed_origins` doesn't list the right extension ID. Confirm the extension ID at `chrome://extensions` matches `pgcnimcldmdfkemofhjfnemieckciche`. |
 | `Error: claude exit …` | `claude` not in PATH or not logged in. Run `claude` manually first. |
 | Quota exhausted mid-session | See Cost / quota. |
-| `Error: claude exit 1` with no stderr | Try `CLAUDE_MODEL=sonnet` — `haiku` may not be available on your plan. Set the env var in the wrapper that invokes the host (see installer in PR-B). |
+| `Error: claude exit 1` with no stderr | Try `CLAUDE_MODEL=sonnet` — `haiku` may not be available on your plan. Edit `~/.linkshit/host.js` and set `MODEL` accordingly, or wrap `host.js` in a tiny script that exports the env var before exec'ing the real one. |
 
 ## Files
 
@@ -231,11 +279,14 @@ The browser-side code never changes.
 - `content.js` — extension content script (UI + scroll + extract + dedupe)
 - `background.js` — service worker bridging content script to native messaging host
 - `host.js` — Node native messaging host; `runLLM()` is the swap point
+- `installers/install.sh` — one-shot Linux/macOS installer template (host.js gets embedded inline at release time)
+- `docs/screenshots/` — illustrative SVG mockups of the Chrome and LinkedIn steps
 - `package.json` — Node metadata (runtime has no deps; dev tooling only)
 - `eslint.config.mjs` — ESLint flat config
 - `.github/workflows/ci.yml` — CI pipeline (validate / check / lint / pack)
-- `.github/workflows/extras.yml` — extras (audit / web-ext lint / link check / smoke)
+- `.github/workflows/extras.yml` — extras (audit / web-ext lint / link check / shellcheck)
 - `.github/workflows/codeql.yml` — CodeQL static analysis
+- `.github/workflows/release.yml` — tag-triggered release: builds extension zip, embeds host.js into install.sh, attaches all three to a GitHub Release
 
 ## Development
 
