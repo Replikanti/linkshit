@@ -100,7 +100,9 @@ If you have not logged in yet:
   5. Come back here
 
 EOF
-read -r -p "Are you already logged in to Claude Code? [y/N] " logged_in
+# Tolerate EOF (Ctrl-D, or `bash install.sh </dev/null`) so `set -e` doesn't
+# kill the script with no message; treat silent stdin as "no".
+read -r -p "Are you already logged in to Claude Code? [y/N] " logged_in || logged_in=""
 case "${logged_in}" in
   [Yy]*) ;;
   *)
@@ -114,7 +116,14 @@ echo
 echo "Installing host.js into ${INSTALL_DIR}/ ..."
 mkdir -p "${INSTALL_DIR}"
 
-if [ "${LINKSHIT_HOST_JS_BASE64}" = "__HOST_JS_BASE64__" ]; then
+# Template-vs-released detection by length, not by string equality with the
+# placeholder. The release workflow's `sed` replaces every occurrence of
+# __HOST_JS_BASE64__ — if we used a string-equality test, the comparison
+# literal here would be substituted too and the test would always be true,
+# defeating the whole point of embedding. A real base64 of host.js is a
+# few thousand chars; the unsubstituted placeholder is 21. 200 is a safe
+# middle threshold.
+if [ "${#LINKSHIT_HOST_JS_BASE64}" -lt 200 ]; then
   # Template form (running from a clone of the repo, before release): pull
   # host.js over the network from the latest release.
   if [ "${LINKSHIT_VERSION}" = "latest" ]; then

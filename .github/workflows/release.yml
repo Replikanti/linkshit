@@ -42,24 +42,40 @@ jobs:
           # Encode host.js as base64 (single line, no wrap) and substitute
           # into the installer template. Use `|` as the sed delimiter since
           # the base64 alphabet (A-Za-z0-9+/=) does not include it.
+          #
+          # The sed is anchored to the assignment line (`^readonly
+          # LINKSHIT_HOST_JS_BASE64=`) so it only rewrites that one place
+          # and never accidentally touches another occurrence of the
+          # placeholder elsewhere in the script (would-be bug: a string
+          # comparison line would be substituted too and silently neutralise
+          # the embedding, dragging every released installer back onto the
+          # network-fallback branch).
           HOST_B64=$(base64 -w0 host.js)
-          sed "s|__HOST_JS_BASE64__|${HOST_B64}|" \
+          sed "/^readonly LINKSHIT_HOST_JS_BASE64=/s|__HOST_JS_BASE64__|${HOST_B64}|" \
             installers/install.sh > installers/install.release.sh
           chmod +x installers/install.release.sh
-          # Sanity-check: parse the generated script.
+
+          # Verify: parses, placeholder gone from the assignment line, blob
+          # round-trips byte-for-byte, and the embedded blob is long enough
+          # that install.sh's runtime length-based detection takes the
+          # embedded branch (not the network fallback).
           bash -n installers/install.release.sh
-          # And spot-check that the placeholder is gone and the encoded
-          # blob round-trips back to the original host.js.
-          if grep -q '__HOST_JS_BASE64__' installers/install.release.sh; then
-            echo "ERROR: placeholder still present after substitution" >&2
+          if grep -q '^readonly LINKSHIT_HOST_JS_BASE64="__HOST_JS_BASE64__"$' installers/install.release.sh; then
+            echo "ERROR: assignment-line placeholder not substituted" >&2
             exit 1
           fi
-          ENCODED=$(grep -oP 'LINKSHIT_HOST_JS_BASE64="\K[^"]+' installers/install.release.sh)
+          ENCODED=$(grep -oP '^readonly LINKSHIT_HOST_JS_BASE64="\K[^"]+' installers/install.release.sh)
           echo "$ENCODED" | base64 -d | diff -q - host.js || {
             echo "ERROR: embedded host.js does not round-trip to source" >&2
             exit 1
           }
-          echo "✓ install.release.sh built and verified"
+          if [ "${#ENCODED}" -lt 200 ]; then
+            echo "ERROR: embedded base64 is only ${#ENCODED} chars; install.sh's" >&2
+            echo "       length-based template detection (<200) would route this" >&2
+            echo "       installer to the network-fallback path." >&2
+            exit 1
+          fi
+          echo "✓ install.release.sh built and verified (${#ENCODED} chars embedded)"
 
       - name: Create GitHub Release with assets
         env:
