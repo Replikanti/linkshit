@@ -9,6 +9,7 @@
     "validate": "node -e \"['manifest.json','package.json'].forEach(f => JSON.parse(require('fs').readFileSync(f,'utf8')))\"",
     "lint": "eslint .",
     "pack": "node scripts/pack.js",
+    "smoke": "node scripts/smoke-host.js",
     "audit": "npm audit --audit-level=high"
   },
   "engines": {

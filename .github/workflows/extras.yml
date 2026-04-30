@@ -1,9 +1,9 @@
 name: Extras
 
 # Secondary CI lane. Catches things the primary `ci.yml` workflow doesn't:
-# known CVEs in deps, manifest issues web-ext lint flags, and broken links
-# in the README. (A native messaging host smoke test is queued for PR-C
-# from #10 — it has to drive Chrome's stdin/stdout protocol.)
+# known CVEs in deps, manifest issues web-ext lint flags, broken links
+# in the README, shellcheck on the installer, and a smoke test that drives
+# host.js through the Chrome native messaging stdin/stdout protocol.
 #
 # Runs on every PR and every push to main, plus weekly to surface drift
 # (new CVEs published, link rot).
@@ -56,6 +56,18 @@ jobs:
       - uses: actions/checkout@v6
       - name: ShellCheck install.sh
         run: shellcheck installers/install.sh
+
+  smoke:
+    name: native host smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run smoke
 
   links:
     name: Markdown link check

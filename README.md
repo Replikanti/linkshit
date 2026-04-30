@@ -284,7 +284,7 @@ The browser-side code never changes.
 - `package.json` — Node metadata (runtime has no deps; dev tooling only)
 - `eslint.config.mjs` — ESLint flat config
 - `.github/workflows/ci.yml` — CI pipeline (validate / check / lint / pack)
-- `.github/workflows/extras.yml` — extras (audit / web-ext lint / link check / shellcheck)
+- `.github/workflows/extras.yml` — extras (audit / web-ext lint / link check / shellcheck / smoke)
 - `.github/workflows/codeql.yml` — CodeQL static analysis
 - `.github/workflows/release.yml` — tag-triggered release: builds extension zip, embeds host.js into install.sh, attaches all three to a GitHub Release
 
@@ -296,6 +296,7 @@ npm run check      # node --check on the JS files
 npm run validate   # JSON files parse
 npm run lint       # eslint
 npm run pack       # builds web-ext-artifacts/linkshit-<version>.zip
+npm run smoke      # drives host.js through the Chrome native messaging protocol
 ```
 
 CI runs check / validate / lint / pack on every push and PR.
