@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const EXTENSION_FILES = ['manifest.json', 'content.js'];
+const EXTENSION_FILES = ['manifest.json', 'content.js', 'background.js'];
 const STAGE_DIR = path.resolve(__dirname, '..', 'dist');
 const ARTIFACTS_DIR = path.resolve(__dirname, '..', 'web-ext-artifacts');
 const REPO_ROOT = path.resolve(__dirname, '..');
