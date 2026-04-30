@@ -149,7 +149,7 @@
     }
     const arr = response.result;
     if (!Array.isArray(arr)) {
-      throw new Error('host returned non-array result');
+      throw new TypeError('host returned non-array result');
     }
     return posts.map((p, i) => {
       const f = arr.find(x => x.id === i + 1) || arr[i] || { score: 0, reason: 'no-score' };

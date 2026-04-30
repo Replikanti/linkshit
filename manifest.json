@@ -7,6 +7,7 @@
   "permissions": ["nativeMessaging"],
   "background": {
     "service_worker": "background.js",
+    "scripts": ["background.js"],
     "type": "module"
   },
   "content_scripts": [
