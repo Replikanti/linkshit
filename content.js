@@ -5,8 +5,9 @@
 //     the feed, so old posts get unmounted — we must snapshot during scroll)
 //   - Auto-scroll with human-like jitter
 //   - Pre-filter: keyword/author allowlist + min reactions
-//   - Send pre-filtered batches to http://127.0.0.1:7777/score (the local
-//     bridge) for LLM scoring
+//   - Send pre-filtered batches to the background service worker via
+//     chrome.runtime.sendMessage; the worker bridges to the native messaging
+//     host (host.js) which spawns the LLM
 //   - Render hits in a side panel
 //   - Persist everything in IndexedDB so already-scored posts are not
 //     re-scored on subsequent sessions
@@ -29,8 +30,6 @@
     scrollMaxMs: 6000,
     batchSize: 8,
     maxPosts: 1500,
-    serverUrl: 'http://127.0.0.1:7777/score',
-    serverToken: '',
   };
   const CFG = {};
   for (const k of Object.keys(DEFAULTS)) {
@@ -139,17 +138,20 @@
     return CFG.keywords.length === 0 && CFG.authors.length === 0;
   }
 
-  // ---------- Score via local bridge ----------
+  // ---------- Score via background service worker → native messaging host ----------
   async function scoreBatch(posts) {
-    const headers = { 'content-type': 'application/json' };
-    if (CFG.serverToken) headers['x-linkshit-token'] = CFG.serverToken;
-    const r = await fetch(CFG.serverUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ criteria: CFG.criteria, posts }),
+    const response = await chrome.runtime.sendMessage({
+      type: 'score',
+      criteria: CFG.criteria,
+      posts,
     });
-    if (!r.ok) throw new Error('server ' + r.status + ': ' + (await r.text()).slice(0, 200));
-    const arr = await r.json();
+    if (!response?.ok) {
+      throw new Error(response?.error || 'no response from native host');
+    }
+    const arr = response.result;
+    if (!Array.isArray(arr)) {
+      throw new TypeError('host returned non-array result');
+    }
     return posts.map((p, i) => {
       const f = arr.find(x => x.id === i + 1) || arr[i] || { score: 0, reason: 'no-score' };
       return { ...p, score: Math.trunc(f.score) || 0, reason: f.reason || '', status: 'scored' };
@@ -307,8 +309,6 @@
       <div class="status" id="lks-status">Idle.</div>
       <div class="body" id="lks-body"></div>
       <div class="body" id="lks-settings" style="display:none;border-top:1px solid #eee;">
-        <label>Local server URL</label><input id="s-serverUrl"/>
-        <label>Server token (printed by score-server.js on start)</label><input id="s-serverToken" type="password"/>
         <label>Criteria</label><textarea id="s-criteria" rows="5"></textarea>
         <label>Pre-filter keywords (comma-separated)</label><input id="s-keywords"/>
         <label>Author allowlist (comma-separated substrings)</label><input id="s-authors"/>
@@ -329,8 +329,6 @@
     const rendered = new Set();
 
     const sync = () => {
-      $('s-serverUrl').value = CFG.serverUrl;
-      $('s-serverToken').value = CFG.serverToken;
       $('s-criteria').value = CFG.criteria;
       $('s-keywords').value = CFG.keywords.join(', ');
       $('s-authors').value = CFG.authors.join(', ');
@@ -350,8 +348,6 @@
       s.style.display = s.style.display === 'none' ? 'block' : 'none';
     };
     $('s-save').onclick = () => {
-      SAVE('serverUrl', $('s-serverUrl').value.trim() || DEFAULTS.serverUrl);
-      SAVE('serverToken', $('s-serverToken').value.trim());
       SAVE('criteria', $('s-criteria').value);
       SAVE('keywords', $('s-keywords').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('authors', $('s-authors').value.split(',').map(s => s.trim()).filter(Boolean));

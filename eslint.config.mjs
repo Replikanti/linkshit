@@ -33,19 +33,23 @@ export default [
     },
   },
   {
-    files: ['content.js'],
+    files: ['content.js', 'background.js'],
     languageOptions: {
       sourceType: 'script',
-      globals: { ...globals.browser, chrome: 'readonly' },
+      globals: {
+        ...globals.browser,
+        ...globals.serviceworker,
+        chrome: 'readonly',
+      },
     },
   },
   {
-    files: ['score-server.js'],
+    files: ['host.js'],
     languageOptions: {
       sourceType: 'script',
-      // `crypto` is added by globals.node (Web Crypto), but score-server.js
-      // imports the node:crypto module under the same name; turn it off so
-      // the require() doesn't trip no-redeclare.
+      // `crypto` is added by globals.node (Web Crypto), but host.js imports
+      // the node:crypto module under the same name; turn it off so the
+      // require() doesn't trip no-redeclare.
       globals: { ...globals.node, crypto: 'off' },
     },
   },

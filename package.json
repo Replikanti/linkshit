@@ -1,19 +1,18 @@
 {
   "name": "linkshit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Linkshit — auto-scroll your LinkedIn feed and surface posts matching your criteria via a local LLM.",
-  "main": "score-server.js",
+  "main": "host.js",
   "scripts": {
-    "start": "node score-server.js",
-    "check": "node --check score-server.js && node --check content.js",
+    "start": "node host.js",
+    "check": "node --check host.js && node --check content.js && node --check background.js",
     "validate": "node -e \"['manifest.json','package.json'].forEach(f => JSON.parse(require('fs').readFileSync(f,'utf8')))\"",
     "lint": "eslint .",
     "pack": "node scripts/pack.js",
-    "smoke": "node scripts/smoke-server.js",
     "audit": "npm audit --audit-level=high"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=22"
   },
   "license": "MIT",
   "private": true,

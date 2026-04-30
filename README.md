@@ -10,8 +10,14 @@ in a side panel. Built for users with thousands of connections whose feed
 takes hours to skim manually.
 
 The default backend is **Claude Code CLI**, so scoring runs against your
-Claude Pro/Max subscription (no API tokens). Swap one function and you can
-point it at the Anthropic API, Ollama, or anything else.
+Claude Pro/Max subscription (no API tokens, no per-call cost). Replace one
+function in `host.js` and you can point it at the Anthropic API, Ollama, or
+anything else.
+
+> **Heads-up.** A non-technical one-click installer is in the oven (issue
+> [#10](https://github.com/Replikanti/linkshit/issues/10), shipping with
+> v0.2.0). Until then the setup below is developer-grade — you write the
+> Chrome native messaging manifest once by hand.
 
 ## How it works
 
@@ -19,93 +25,92 @@ point it at the Anthropic API, Ollama, or anything else.
 flowchart TD
     subgraph Browser["Browser (your logged-in Chrome)"]
         Ext["Chrome MV3 extension<br/>auto-scroll · capture · dedupe<br/>pre-filter · render hits"]
+        BG["background service worker<br/>chrome.runtime.connectNative"]
     end
-    subgraph Local["Localhost"]
-        Bridge["score-server.js<br/>:7777 · auth-gated<br/>runLLM() swap point"]
+    subgraph Local["Localhost (no port, no server)"]
+        Host["host.js<br/>spawned by Chrome on demand<br/>runLLM() swap point"]
         CC["Claude Code CLI<br/>claude -p"]
     end
     Anthropic[("Anthropic<br/>Pro/Max account")]
 
-    Ext -->|"POST /score<br/>X-Linkshit-Token"| Bridge
-    Bridge -->|"spawns"| CC
+    Ext -->|"chrome.runtime.sendMessage"| BG
+    BG -->|"native messaging<br/>(stdin/stdout JSON)"| Host
+    Host -->|"spawns"| CC
     CC -->|"OAuth"| Anthropic
 ```
 
-Two pieces:
+Three pieces:
 
-1. **Minimal Chrome MV3 extension** — three files (`manifest.json`,
-   `content.js`, this repo's directory). Loaded unpacked in
-   `chrome://extensions`. Activates only on `linkedin.com/feed/*`.
-2. **Localhost Node bridge** (`score-server.js`) — wraps an LLM call in a
-   tiny HTTP endpoint at `127.0.0.1:7777`. Default impl spawns `claude -p`,
-   which uses your Claude Code OAuth login.
+1. **Chrome MV3 extension** (`manifest.json`, `content.js`, `background.js`)
+   — loaded unpacked. The content script runs the panel on
+   `linkedin.com/feed/*`; the background service worker bridges to the
+   native messaging host.
+2. **Native messaging host** (`host.js`) — a Node script that Chrome
+   spawns on demand when the extension opens a `connectNative` port and
+   tears down when the connection closes. Speaks length-prefixed JSON
+   over stdin/stdout. Holds the `runLLM()` swap point.
+3. **Native messaging manifest** — a small JSON file at an OS-specific
+   path that tells Chrome where `host.js` is and which extension is
+   allowed to call it.
 
-The extension talks to the bridge over `http://127.0.0.1:7777`. Pure browser
-solutions (bookmarklets, DevTools snippets) cannot make API calls from
-LinkedIn pages because LinkedIn's CSP blocks `connect-src` to non-allowlisted
-hosts. The extension's `host_permissions` bypass that.
+There is no localhost HTTP server, no auth token, no port to manage. Chrome
+authenticates the connection by extension ID (stabilized via the `key` field
+in `manifest.json`).
 
 ## Prerequisites
 
-- **Node.js 18+**
+- **Node.js 22+** (the host runs on Node, ships with no runtime deps).
 - **[Claude Code](https://docs.claude.com/en/docs/claude-code)** installed
-  and signed in with a Pro or Max account (`claude` → "Sign in with
-  Anthropic"). Run `claude` once interactively first to make sure it works.
+  and signed in with a Pro or Max account (`claude` once interactively to
+  complete the OAuth login).
 - **Google Chrome** (or Chromium-based browser with MV3 support).
 
-## Setup
+## Setup (manual, until v0.2.0 ships an installer)
 
-### 1. Clone the repo
+### 1. Clone the repo and install dev tooling
 
 ```bash
 git clone git@github.com:Replikanti/linkshit.git
 cd linkshit
+npm install
 ```
 
-### 2. Start the local bridge
-
-```bash
-node score-server.js
-```
-
-You should see:
-
-```
-Linkshit score server on http://127.0.0.1:7777 (model=haiku)
-Auth token: a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6
-Paste this into the panel's "Server token" field, or set LINKSHIT_TOKEN to pin a value.
-```
-
-Copy the **Auth token** — you'll paste it into the panel in the next step.
-Without it, the bridge returns `401 unauthorized` for every request, which
-blocks any other tab the user happens to have open from spending their
-Claude quota.
-
-Environment overrides:
-
-| Variable | Default | What it does |
-|---|---|---|
-| `LINKSHIT_TOKEN` | random hex on each start | Pin the auth token so it survives restarts. |
-| `CLAUDE_MODEL` | `haiku` | Model passed to `claude --model`. |
-| `CLAUDE_BIN` | `claude` | Path to the Claude Code binary. |
-| `PORT` | `7777` | TCP port (loopback only). |
-
-To run in the background and survive your terminal closing:
-
-```bash
-setsid node score-server.js > /tmp/linkshit.log 2>&1 < /dev/null &
-```
-
-(Read the token from `/tmp/linkshit.log`, or pin it with `LINKSHIT_TOKEN`.)
-
-### 3. Load the extension in Chrome
+### 2. Load the extension in Chrome
 
 1. Open `chrome://extensions`
-2. Toggle **Developer mode** in the top right
+2. Toggle **Developer mode** (top right)
 3. Click **Load unpacked**
 4. Select this repository's directory
 
-The extension activates the next time you visit `linkedin.com/feed`.
+The extension's ID is pinned via `manifest.json`'s `key` field, so it is
+stable across reloads: **`pgcnimcldmdfkemofhjfnemieckciche`**. The native
+messaging manifest references this exact ID.
+
+### 3. Register the native messaging host
+
+Pick the path for your OS:
+
+- **Linux:** `~/.config/google-chrome/NativeMessagingHosts/com.replikanti.linkshit.json`
+- **macOS:** `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.replikanti.linkshit.json`
+- **Windows:** registered via a registry key under `HKCU\Software\Google\Chrome\NativeMessagingHosts\com.replikanti.linkshit` (see [Chrome docs](https://developer.chrome.com/docs/extensions/develop/concepts/native-messaging))
+
+Write this JSON (replacing `/full/path/to/host.js` with the absolute path
+to `host.js` in your clone):
+
+```json
+{
+  "name": "com.replikanti.linkshit",
+  "description": "Linkshit native messaging host",
+  "path": "/full/path/to/host.js",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://pgcnimcldmdfkemofhjfnemieckciche/"
+  ]
+}
+```
+
+Make sure `host.js` is executable (`chmod +x host.js` after clone — git
+should preserve the bit).
 
 ### 4. Configure and run
 
@@ -113,10 +118,8 @@ Visit `linkedin.com/feed`. A panel appears in the upper right. Click **⚙**:
 
 | Setting | What it does |
 |---|---|
-| **Local server URL** | Where to POST batches. Default `http://127.0.0.1:7777/score`. |
-| **Server token** | Paste the **Auth token** printed by `score-server.js` on start. Without it the bridge rejects every request. |
 | **Criteria** | Free-text description of what's relevant. Sent to the LLM. The more specific, the better the scores. |
-| **Pre-filter keywords** | Comma-separated. Only posts containing at least one keyword get scored. Empty = score everything (expensive). |
+| **Pre-filter keywords** | Comma-separated. Only posts containing at least one keyword get scored. Empty = score everything (expensive in subscription quota). |
 | **Author allowlist** | Comma-separated substrings. Matching authors always pass pre-filter regardless of keywords. |
 | **Min reactions** | Skip posts with fewer reactions than this. |
 | **Score threshold** | 0–10. Posts at or above this score show up in the panel. |
@@ -137,13 +140,12 @@ panel sorted by score.
 
 Pro plan's ~45 messages / 5h window is borderline for one daily session. On
 Max, you're fine. If you're on Pro and you hit limits, increase batch size
-to 15–20, tighten the pre-filter, or drop to API tokens (cheaper than
-upgrading Pro → Max if Linkshit is the only reason).
+to 15–20 or tighten the pre-filter.
 
 ## Swap the backend
 
-`score-server.js` exposes a single function called `runLLM(prompt)`. Replace
-its body to use any backend.
+`host.js` exposes a single function called `runLLM(prompt)`. Replace its
+body to use any backend.
 
 **Anthropic API** (per-token billing, no Claude Code dependency):
 
@@ -195,13 +197,11 @@ The browser-side code never changes.
   `captured` counter stays at 0, open DevTools, find the new CSS class
   names, and update `extractPost()` in `content.js`. The current targets
   are documented in a comment there.
-- **No secret in the browser** by default. Default Claude Code path keeps
-  your auth on disk (Claude Code OAuth tokens). The bridge's auth token
-  lives in the extension's `localStorage` for `linkedin.com`, which is
-  shared with LinkedIn's own scripts on the same origin. Realistic threat
-  model is "any tab, not just LinkedIn, can hit the loopback bridge"; the
-  shared-secret token closes that. If you swap to the API path, keep the
-  API key in `score-server.js` (server-side), not in extension storage.
+- **No secret in the browser.** Native messaging is authenticated by
+  extension ID, not by a shared secret. The `key` field in `manifest.json`
+  pins the extension ID; the native host's `allowed_origins` whitelists
+  exactly that ID. No token to leak, nothing in `localStorage` worth
+  stealing.
 - **Prompt injection from post text.** Each batch wraps its posts in
   `<post-NONCE id="N">…</post-NONCE>` tags using a per-call random hex
   nonce, so a poster cannot synthesize a valid closing tag to break out
@@ -219,21 +219,23 @@ The browser-side code never changes.
 |---|---|
 | Panel never appears | Extension not loaded, or you're on a non-`www` LinkedIn subdomain. Check `chrome://extensions`. Reload the LinkedIn tab. |
 | `captured` stuck at 0 | Selector drift. See Risks. |
-| `Error: server 401: {"error":"unauthorized"}` | Server token in panel is empty or wrong. Copy the **Auth token** from `score-server.js` output into the panel's **Server token** field. |
-| `Error: server 500: …` | Check the `score-server.js` terminal — `claude` may not be in PATH or not logged in. Run `claude` manually. |
-| `Error: …` with no response code | Bridge not running, or extension's `host_permissions` doesn't include the URL set in **Local server URL**. |
+| `Error: native host disconnected before responding (is it installed?)` | Chrome can't find `host.js`. The native messaging manifest is missing, or its `path` is wrong. Re-check step 3 of Setup. |
+| `Error: failed to connect to native host: …` | Same family — manifest exists but Chrome rejected it. Often the `allowed_origins` doesn't list the right extension ID. Confirm the extension ID at `chrome://extensions` matches `pgcnimcldmdfkemofhjfnemieckciche`. |
+| `Error: claude exit …` | `claude` not in PATH or not logged in. Run `claude` manually first. |
 | Quota exhausted mid-session | See Cost / quota. |
-| `claude exit 1` with no stderr | Try `CLAUDE_MODEL=sonnet` — `haiku` may not be available on your plan. |
-| Port 7777 already in use | Start the server with `PORT=8080 node score-server.js` and update **Local server URL** in the panel to match. |
+| `Error: claude exit 1` with no stderr | Try `CLAUDE_MODEL=sonnet` — `haiku` may not be available on your plan. Set the env var in the wrapper that invokes the host (see installer in PR-B). |
 
 ## Files
 
-- `manifest.json` — Chrome MV3 extension manifest
+- `manifest.json` — Chrome MV3 extension manifest, with `key` field pinning the extension ID
 - `content.js` — extension content script (UI + scroll + extract + dedupe)
-- `score-server.js` — Node localhost bridge; `runLLM` is the swap point
+- `background.js` — service worker bridging content script to native messaging host
+- `host.js` — Node native messaging host; `runLLM()` is the swap point
 - `package.json` — Node metadata (runtime has no deps; dev tooling only)
 - `eslint.config.mjs` — ESLint flat config
 - `.github/workflows/ci.yml` — CI pipeline (validate / check / lint / pack)
+- `.github/workflows/extras.yml` — extras (audit / web-ext lint / link check / smoke)
+- `.github/workflows/codeql.yml` — CodeQL static analysis
 
 ## Development
 
@@ -245,8 +247,7 @@ npm run lint       # eslint
 npm run pack       # builds web-ext-artifacts/linkshit-<version>.zip
 ```
 
-CI runs all four on every push and PR, then uploads the packed extension as
-a build artifact.
+CI runs check / validate / lint / pack on every push and PR.
 
 ## License
 
