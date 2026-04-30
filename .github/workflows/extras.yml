@@ -1,9 +1,9 @@
 name: Extras
 
 # Secondary CI lane. Catches things the primary `ci.yml` workflow doesn't:
-# known CVEs in deps, manifest issues web-ext lint flags as warnings,
-# broken links in the README, and behavioral regressions in score-server.js
-# that lint can't see (auth gate, status codes).
+# known CVEs in deps, manifest issues web-ext lint flags, and broken links
+# in the README. (A native messaging host smoke test is queued for PR-C
+# from #10 — it has to drive Chrome's stdin/stdout protocol.)
 #
 # Runs on every PR and every push to main, plus weekly to surface drift
 # (new CVEs published, link rot).
@@ -62,14 +62,3 @@ jobs:
           args: --no-progress --verbose --max-concurrency 4 './README.md'
           fail: true
 
-  smoke:
-    name: score-server smoke test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run smoke

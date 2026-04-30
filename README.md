@@ -186,16 +186,6 @@ async function runLLM(prompt) {
 
 The browser-side code never changes.
 
-## Legacy fallback: localhost HTTP bridge
-
-`score-server.js` is the previous architecture (HTTP server on
-`127.0.0.1:7777` with shared-secret token). It is preserved for
-environments where Chrome native messaging is blocked by enterprise
-policy. It is not the default and is not exercised by the extension as
-shipped — to use it you would have to re-add `serverUrl` / `serverToken`
-settings to `content.js` and point `host_permissions` back at
-`http://127.0.0.1/*`. Most users should not need it.
-
 ## Risks
 
 - **LinkedIn ToS.** Automated interaction with LinkedIn is against their
@@ -241,7 +231,6 @@ settings to `content.js` and point `host_permissions` back at
 - `content.js` — extension content script (UI + scroll + extract + dedupe)
 - `background.js` — service worker bridging content script to native messaging host
 - `host.js` — Node native messaging host; `runLLM()` is the swap point
-- `score-server.js` — legacy HTTP bridge (see "Legacy fallback" above)
 - `package.json` — Node metadata (runtime has no deps; dev tooling only)
 - `eslint.config.mjs` — ESLint flat config
 - `.github/workflows/ci.yml` — CI pipeline (validate / check / lint / pack)
@@ -256,7 +245,6 @@ npm run check      # node --check on the JS files
 npm run validate   # JSON files parse
 npm run lint       # eslint
 npm run pack       # builds web-ext-artifacts/linkshit-<version>.zip
-npm run smoke      # boots score-server.js (legacy) and exercises auth gate
 ```
 
 CI runs check / validate / lint / pack on every push and PR.

@@ -44,12 +44,12 @@ export default [
     },
   },
   {
-    files: ['score-server.js', 'host.js'],
+    files: ['host.js'],
     languageOptions: {
       sourceType: 'script',
-      // `crypto` is added by globals.node (Web Crypto), but these files
-      // import the node:crypto module under the same name; turn it off so
-      // the require() doesn't trip no-redeclare.
+      // `crypto` is added by globals.node (Web Crypto), but host.js imports
+      // the node:crypto module under the same name; turn it off so the
+      // require() doesn't trip no-redeclare.
       globals: { ...globals.node, crypto: 'off' },
     },
   },

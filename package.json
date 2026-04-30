@@ -5,11 +5,10 @@
   "main": "host.js",
   "scripts": {
     "start": "node host.js",
-    "check": "node --check host.js && node --check content.js && node --check background.js && node --check score-server.js",
+    "check": "node --check host.js && node --check content.js && node --check background.js",
     "validate": "node -e \"['manifest.json','package.json'].forEach(f => JSON.parse(require('fs').readFileSync(f,'utf8')))\"",
     "lint": "eslint .",
     "pack": "node scripts/pack.js",
-    "smoke": "node scripts/smoke-server.js",
     "audit": "npm audit --audit-level=high"
   },
   "engines": {
