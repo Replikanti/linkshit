@@ -13,7 +13,7 @@
 //   4. malformed JSON inside a frame is reported via {ok:false,error}
 //      (not silently dropped — the bug fixed during PR-A's QA round)
 //
-// Runs in the `score-server smoke test` job in extras.yml on every PR
+// Runs in the `native host smoke test` job in extras.yml on every PR
 // and push to main, and locally via `npm run smoke`.
 
 const { spawn } = require('node:child_process');
@@ -133,8 +133,9 @@ async function checks() {
   process.exit(0);
 }
 
-const watchdog = setTimeout(() => fail('test timeout (10 s)'), 10000);
+// Watchdog: fires only if checks() hangs. Both `process.exit()` calls in
+// checks() and fail() are synchronous, so a `.finally()` would never run
+// — the timer is killed by the process exit itself.
+setTimeout(() => fail('test timeout (10 s)'), 10000);
 
-checks()
-  .catch(e => fail(e.message ?? String(e)))
-  .finally(() => clearTimeout(watchdog));
+checks().catch(e => fail(e.message ?? String(e)));
