@@ -5,8 +5,9 @@
 //     the feed, so old posts get unmounted — we must snapshot during scroll)
 //   - Auto-scroll with human-like jitter
 //   - Pre-filter: keyword/author allowlist + min reactions
-//   - Send pre-filtered batches to http://127.0.0.1:7777/score (the local
-//     bridge) for LLM scoring
+//   - Send pre-filtered batches to the background service worker via
+//     chrome.runtime.sendMessage; the worker bridges to the native messaging
+//     host (host.js) which spawns the LLM
 //   - Render hits in a side panel
 //   - Persist everything in IndexedDB so already-scored posts are not
 //     re-scored on subsequent sessions

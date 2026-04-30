@@ -18,32 +18,46 @@ const crypto = require('node:crypto');
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const MODEL = process.env.CLAUDE_MODEL || 'haiku';
 
-function readMessage() {
-  return new Promise((resolve, reject) => {
-    let buf = Buffer.alloc(0);
-    let expected = -1;
-    const onData = chunk => {
-      buf = Buffer.concat([buf, chunk]);
-      if (expected < 0 && buf.length >= 4) {
-        expected = buf.readUInt32LE(0);
+// Module-level inbound buffer. Persists across readMessage calls so a single
+// stdin chunk that contains multiple complete frames (or a partial one) is
+// reassembled correctly across the loop in main().
+let inboundBuf = Buffer.alloc(0);
+let stdinEnded = false;
+let onDataAvailable = null;
+
+process.stdin.on('data', chunk => {
+  inboundBuf = Buffer.concat([inboundBuf, chunk]);
+  if (onDataAvailable) {
+    const cb = onDataAvailable;
+    onDataAvailable = null;
+    cb();
+  }
+});
+process.stdin.on('end', () => {
+  stdinEnded = true;
+  if (onDataAvailable) {
+    const cb = onDataAvailable;
+    onDataAvailable = null;
+    cb();
+  }
+});
+
+// Returns the next decoded JSON message, or null if stdin ended cleanly with
+// no remaining frame. Throws SyntaxError on malformed JSON inside a frame —
+// caller is expected to surface that as an error envelope rather than crash.
+async function readMessage() {
+  while (true) {
+    if (inboundBuf.length >= 4) {
+      const expected = inboundBuf.readUInt32LE(0);
+      if (inboundBuf.length >= 4 + expected) {
+        const body = inboundBuf.subarray(4, 4 + expected).toString('utf8');
+        inboundBuf = inboundBuf.subarray(4 + expected);
+        return JSON.parse(body);
       }
-      if (expected >= 0 && buf.length >= 4 + expected) {
-        process.stdin.removeListener('data', onData);
-        process.stdin.removeListener('end', onEnd);
-        try {
-          resolve(JSON.parse(buf.subarray(4, 4 + expected).toString('utf8')));
-        } catch (e) {
-          reject(e);
-        }
-      }
-    };
-    const onEnd = () => {
-      process.stdin.removeListener('data', onData);
-      reject(new Error('stdin ended'));
-    };
-    process.stdin.on('data', onData);
-    process.stdin.on('end', onEnd);
-  });
+    }
+    if (stdinEnded) return null;
+    await new Promise(resolve => { onDataAvailable = resolve; });
+  }
 }
 
 function sendMessage(msg) {
@@ -132,14 +146,18 @@ async function handle(msg) {
 
 async function main() {
   // Chrome opens a fresh process for each connectNative() and closes stdin
-  // when the port disconnects. We loop until stdin ends.
+  // when the port disconnects. We loop until stdin ends. Malformed JSON
+  // inside a frame is surfaced as an error envelope so the caller knows
+  // what happened instead of getting silent EOF.
   while (true) {
     let msg;
     try {
       msg = await readMessage();
-    } catch {
-      break;
+    } catch (e) {
+      sendMessage({ ok: false, error: 'malformed JSON in framed message: ' + e.message });
+      continue;
     }
+    if (msg === null) break;
     sendMessage(await handle(msg));
   }
 }
