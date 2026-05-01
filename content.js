@@ -25,6 +25,7 @@
     keywords: ['ai', 'recruit', 'sourc', 'hir', 'engineer', 'llm', 'startup', 'founder'],
     authors: [],
     minReactions: 0,
+    maxAgeHours: 0,
     scoreThresh: 7,
     scrollMinMs: 3000,
     scrollMaxMs: 6000,
@@ -114,6 +115,50 @@
       if (t === 'Promoted' || t === 'Sponsored') return true;
     }
     return false;
+  }
+  // LinkedIn renders post age as relative text (2h, 3d, 1mo, 2y) in the
+  // actor sub-description. Returns hours or null when unparseable; null
+  // is treated as "do not filter" (defensive — would rather over-include).
+  // The unit table starts with the longer keys so "mo" / "min" beat "m".
+  // String-based dispatch (instead of one alternation regex) keeps the
+  // hot path linear and avoids ReDoS-leaning patterns.
+  const AGE_UNITS = [
+    ['mo', 720],
+    ['min', 1 / 60],
+    ['s', 1 / 3600],
+    ['m', 1 / 60],
+    ['h', 1],
+    ['d', 24],
+    ['w', 168],
+    ['y', 8760],
+  ];
+  function parseAgeHours(text) {
+    if (!text) return null;
+    const digits = /(\d+)/.exec(text);
+    if (!digits) return null;
+    const n = Number.parseInt(digits[1], 10);
+    if (!Number.isFinite(n)) return null;
+    const rest = text.slice(digits.index + digits[0].length).trimStart().toLowerCase();
+    if (!rest) return null;
+    for (const [unit, factor] of AGE_UNITS) {
+      if (rest.startsWith(unit)) return n * factor;
+    }
+    return null;
+  }
+  function extractAgeHours(el) {
+    const actor = el.querySelector('.update-components-actor') || el;
+    const subdesc = actor.querySelector('.update-components-actor__sub-description');
+    if (subdesc) {
+      const h = parseAgeHours(subdesc.innerText);
+      if (h != null) return h;
+    }
+    for (const node of actor.querySelectorAll('span')) {
+      const t = (node.textContent || '').trim();
+      if (!t || t.length > 30) continue;
+      const h = parseAgeHours(t);
+      if (h != null) return h;
+    }
+    return null;
   }
   function extractPost(el) {
     const urn = el.dataset.urn || el.dataset.id || '';
@@ -214,6 +259,13 @@
     if (isPromoted(el)) {
       ui.bump('promoted', 1);
       return;
+    }
+    if (CFG.maxAgeHours > 0) {
+      const age = extractAgeHours(el);
+      if (age != null && age > CFG.maxAgeHours) {
+        ui.bump('tooOld', 1);
+        return;
+      }
     }
     const ex = await dbGet(post.urn);
     if (ex?.status === 'scored') {
@@ -368,6 +420,7 @@
       <div class="counters">
         <span>captured <b id="lks-c-captured">0</b></span>
         <span>promoted <b id="lks-c-promoted">0</b></span>
+        <span>old <b id="lks-c-tooOld">0</b></span>
         <span>queued <b id="lks-c-queued">0</b></span>
         <span>scored <b id="lks-c-scored">0</b></span>
         <span>hits <b id="lks-c-hits">0</b></span>
@@ -382,6 +435,7 @@
         <label>Pre-filter keywords (comma-separated)</label><input id="s-keywords"/>
         <label>Author allowlist (comma-separated substrings)</label><input id="s-authors"/>
         <label>Min reactions</label><input id="s-minReactions" type="number"/>
+        <label>Max age (hours, 0 = unlimited)</label><input id="s-maxAgeHours" type="number"/>
         <label>Score threshold to surface</label><input id="s-scoreThresh" type="number"/>
         <label>Scroll delay min / max ms</label>
         <input id="s-scrollMinMs" type="number"/><input id="s-scrollMaxMs" type="number"/>
@@ -393,7 +447,7 @@
       </div>`;
     document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
-    const counters = { captured: 0, promoted: 0, queued: 0, scored: 0, hits: 0 };
+    const counters = { captured: 0, promoted: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
     // scroll-into-view of the same post don't produce duplicate rows.
     const rendered = new Set();
@@ -403,6 +457,7 @@
       $('s-keywords').value = CFG.keywords.join(', ');
       $('s-authors').value = CFG.authors.join(', ');
       $('s-minReactions').value = CFG.minReactions;
+      $('s-maxAgeHours').value = CFG.maxAgeHours;
       $('s-scoreThresh').value = CFG.scoreThresh;
       $('s-scrollMinMs').value = CFG.scrollMinMs;
       $('s-scrollMaxMs').value = CFG.scrollMaxMs;
@@ -423,6 +478,7 @@
       SAVE('keywords', $('s-keywords').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('authors', $('s-authors').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('minReactions', Number.parseInt($('s-minReactions').value, 10) || 0);
+      SAVE('maxAgeHours', Number.parseInt($('s-maxAgeHours').value, 10) || 0);
       SAVE('scoreThresh', Number.parseInt($('s-scoreThresh').value, 10) || 7);
       SAVE('scrollMinMs', Number.parseInt($('s-scrollMinMs').value, 10) || 3000);
       SAVE('scrollMaxMs', Number.parseInt($('s-scrollMaxMs').value, 10) || 6000);
