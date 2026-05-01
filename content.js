@@ -324,6 +324,7 @@
         <label>Batch size</label><input id="s-batchSize" type="number"/>
         <label>Max posts per session</label><input id="s-maxPosts" type="number"/>
         <button id="s-save" class="primary">Save</button>
+        <button id="s-cancel">Cancel</button>
         <button id="s-clear">Clear DB</button>
       </div>`;
     document.body.append(panel);
@@ -364,6 +365,11 @@
       SAVE('maxPosts', Number.parseInt($('s-maxPosts').value, 10) || 1500);
       $('lks-settings').style.display = 'none';
       setStatus('Settings saved.');
+    };
+    $('s-cancel').onclick = () => {
+      sync();
+      $('lks-settings').style.display = 'none';
+      setStatus('Settings unchanged.');
     };
     $('s-clear').onclick = async () => {
       if (!confirm('Wipe all stored posts and scores?')) return;
