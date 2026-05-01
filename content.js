@@ -27,6 +27,8 @@
     minReactions: 0,
     maxAgeHours: 0,
     scoreThresh: 7,
+    showBorderline: false,
+    borderlineDelta: 2,
     scrollMinMs: 3000,
     scrollMaxMs: 6000,
     batchSize: 8,
@@ -41,6 +43,8 @@
       try { CFG[k] = JSON.parse(raw); } catch { CFG[k] = DEFAULTS[k]; }
     } else if (typeof DEFAULTS[k] === 'number') {
       CFG[k] = +raw;
+    } else if (typeof DEFAULTS[k] === 'boolean') {
+      CFG[k] = raw === 'true';
     } else {
       CFG[k] = raw;
     }
@@ -232,7 +236,11 @@
       const scored = await scoreBatch(batch);
       for (const s of scored) {
         await dbPut(s);
-        if (s.score >= CFG.scoreThresh) ui.addResult(s);
+        if (s.score >= CFG.scoreThresh) {
+          ui.addResult(s);
+        } else if (CFG.showBorderline && s.score >= CFG.scoreThresh - CFG.borderlineDelta) {
+          ui.addResult({ ...s, borderline: true });
+        }
       }
       ui.bump('scored', scored.length);
       ui.setStatus(scrollTimer ? 'Scrolling…' : 'Idle.');
@@ -270,6 +278,9 @@
     const ex = await dbGet(post.urn);
     if (ex?.status === 'scored') {
       if (ex.score >= CFG.scoreThresh) ui.addResult(ex);
+      else if (CFG.showBorderline && ex.score >= CFG.scoreThresh - CFG.borderlineDelta) {
+        ui.addResult({ ...ex, borderline: true });
+      }
       return;
     }
     await dbPut(post);
@@ -392,6 +403,10 @@
     #lks-panel .hint{padding:10px 12px;font-size:12px;color:var(--hint-fg);background:var(--hint-bg);
       border-bottom:1px solid var(--border-subtle);line-height:1.45}
     #lks-panel .result{padding:8px 0;border-bottom:1px solid var(--row-border)}
+    #lks-panel .result.borderline{opacity:.6;border-left:3px dotted var(--btn-border);
+      padding-left:6px;margin-left:-6px}
+    #lks-panel .result.borderline .score{background:var(--btn-bg);color:var(--muted);
+      border:1px solid var(--btn-border)}
     #lks-panel .result .author{font-weight:600}
     #lks-panel .result .score{float:right;background:var(--primary);color:var(--primary-fg);padding:1px 6px;
       border-radius:3px;font-size:11px}
@@ -442,6 +457,8 @@
         <label>Min reactions</label><input id="s-minReactions" type="number"/>
         <label>Max age (hours, 0 = unlimited)</label><input id="s-maxAgeHours" type="number"/>
         <label>Score threshold to surface</label><input id="s-scoreThresh" type="number"/>
+        <label><input id="s-showBorderline" type="checkbox" style="width:auto;margin-right:6px"/>Show borderline (within N below threshold)</label>
+        <label>Borderline N</label><input id="s-borderlineDelta" type="number"/>
         <label>Scroll delay min / max ms</label>
         <input id="s-scrollMinMs" type="number"/><input id="s-scrollMaxMs" type="number"/>
         <label>Batch size</label><input id="s-batchSize" type="number"/>
@@ -529,6 +546,8 @@
       $('s-minReactions').value = CFG.minReactions;
       $('s-maxAgeHours').value = CFG.maxAgeHours;
       $('s-scoreThresh').value = CFG.scoreThresh;
+      $('s-showBorderline').checked = CFG.showBorderline;
+      $('s-borderlineDelta').value = CFG.borderlineDelta;
       $('s-scrollMinMs').value = CFG.scrollMinMs;
       $('s-scrollMaxMs').value = CFG.scrollMaxMs;
       $('s-batchSize').value = CFG.batchSize;
@@ -550,6 +569,8 @@
       SAVE('minReactions', Number.parseInt($('s-minReactions').value, 10) || 0);
       SAVE('maxAgeHours', Number.parseInt($('s-maxAgeHours').value, 10) || 0);
       SAVE('scoreThresh', Number.parseInt($('s-scoreThresh').value, 10) || 7);
+      SAVE('showBorderline', $('s-showBorderline').checked);
+      SAVE('borderlineDelta', Number.parseInt($('s-borderlineDelta').value, 10) || 2);
       SAVE('scrollMinMs', Number.parseInt($('s-scrollMinMs').value, 10) || 3000);
       SAVE('scrollMaxMs', Number.parseInt($('s-scrollMaxMs').value, 10) || 6000);
       SAVE('batchSize', Number.parseInt($('s-batchSize').value, 10) || 8);
@@ -596,9 +617,9 @@
     function addResult(post) {
       if (rendered.has(post.urn)) return;
       rendered.add(post.urn);
-      bump('hits', 1);
+      if (!post.borderline) bump('hits', 1);
       const div = document.createElement('div');
-      div.className = 'result';
+      div.className = post.borderline ? 'result borderline' : 'result';
       div.innerHTML = `
         <div><span class="score"></span><span class="author"></span></div>
         <div class="reason"></div>
@@ -621,8 +642,13 @@
   // ---------- Boot ----------
   (async () => {
     startObserver();
-    const past = await dbAllScored(CFG.scoreThresh);
-    for (const p of past.slice(0, 50)) ui.addResult(p);
+    const lowerBound = CFG.showBorderline
+      ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
+      : CFG.scoreThresh;
+    const past = await dbAllScored(lowerBound);
+    for (const p of past.slice(0, 50)) {
+      ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true });
+    }
     const anyStored = await dbAllScored(0);
     if (anyStored.length === 0) ui.showHint();
     ui.setStatus('Ready. Click Start.');
