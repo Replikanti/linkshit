@@ -512,6 +512,13 @@
       border-bottom:1px solid var(--border-subtle)}
     #lks-panel .hint{padding:10px 12px;font-size:12px;color:var(--hint-fg);background:var(--hint-bg);
       border-bottom:1px solid var(--border-subtle);line-height:1.45}
+    #lks-panel .history-controls{display:flex;flex-direction:column;gap:4px;
+      padding-bottom:8px;border-bottom:1px solid var(--border-subtle);margin-bottom:6px}
+    #lks-panel .history-controls input[type=text]{box-sizing:border-box;width:100%;
+      background:var(--field-bg);color:var(--fg);border:1px solid var(--field-border);
+      border-radius:3px;padding:3px 5px;font:inherit}
+    #lks-panel .history-controls input[type=range]{width:100%}
+    #lks-panel .history-empty{color:var(--muted);font-size:12px;padding:8px 0}
     #lks-panel .result{padding:8px 0;border-bottom:1px solid var(--row-border)}
     #lks-panel .result.borderline{opacity:.6;border-left:3px dotted var(--btn-border);
       padding-left:6px;margin-left:-6px}
@@ -544,6 +551,7 @@
           <button id="lks-start" class="primary">Start</button>
           <button id="lks-pause">Pause</button>
           <button id="lks-stop">Stop</button>
+          <button id="lks-history-toggle">History</button>
           <button id="lks-cog">⚙</button>
         </span>
       </header>
@@ -560,6 +568,14 @@
         Set your <b>Criteria</b> in <b>⚙</b> → click <b>Start</b> to begin scoring your feed.
       </div>
       <div class="body" id="lks-body"></div>
+      <div class="body" id="lks-history" style="display:none">
+        <div class="history-controls">
+          <label>Min score: <b id="lks-history-min">0</b></label>
+          <input id="lks-history-range" type="range" min="0" max="10" step="1" value="0"/>
+          <input id="lks-history-search" type="text" placeholder="Search author or text…"/>
+        </div>
+        <div id="lks-history-list"></div>
+      </div>
       <div class="body" id="lks-settings" style="display:none;border-top:1px solid #eee;">
         <label>Criteria (active profile)</label><textarea id="s-criteria" rows="5"></textarea>
         <div style="margin:2px 0 6px">
@@ -688,6 +704,59 @@
     $('lks-start').onclick = () => { hideHint(); startScroll(); };
     $('lks-pause').onclick = () => pauseScroll();
     $('lks-stop').onclick = () => { stopScroll(); maybeFlush(true); };
+
+    // ---------- History view ----------
+    let historyMode = false;
+    let historySearchTimer = null;
+    function renderHistoryRow(p) {
+      const row = document.createElement('div');
+      row.className = 'result';
+      row.innerHTML = `
+        <div><span class="score"></span><span class="author"></span></div>
+        <div class="reason"></div>
+        <div class="snippet"></div>
+        <a target="_blank">Open on LinkedIn →</a>`;
+      row.querySelector('.score').textContent = p.score;
+      row.querySelector('.author').textContent = p.author;
+      row.querySelector('.reason').textContent = p.reason || '';
+      row.querySelector('.snippet').textContent = (p.text || '').slice(0, 240);
+      row.querySelector('a').href = p.url;
+      return row;
+    }
+    async function renderHistory() {
+      const min = Number.parseInt($('lks-history-range').value, 10) || 0;
+      $('lks-history-min').textContent = String(min);
+      const q = $('lks-history-search').value.trim().toLowerCase();
+      const list = $('lks-history-list');
+      list.innerHTML = '';
+      const all = await dbAllScored(min);
+      const filtered = q
+        ? all.filter(p => (p.author + ' ' + (p.text || '')).toLowerCase().includes(q))
+        : all;
+      if (filtered.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'history-empty';
+        empty.textContent = 'No stored posts match these filters.';
+        list.append(empty);
+        return;
+      }
+      const frag = document.createDocumentFragment();
+      for (const p of filtered.slice(0, 200)) frag.append(renderHistoryRow(p));
+      list.append(frag);
+    }
+    $('lks-history-toggle').onclick = () => {
+      historyMode = !historyMode;
+      $('lks-body').style.display = historyMode ? 'none' : '';
+      $('lks-history').style.display = historyMode ? '' : 'none';
+      $('lks-history-toggle').textContent = historyMode ? 'Live' : 'History';
+      if (historyMode) renderHistory();
+    };
+    $('lks-history-range').oninput = () => { if (historyMode) renderHistory(); };
+    $('lks-history-search').oninput = () => {
+      if (!historyMode) return;
+      if (historySearchTimer) clearTimeout(historySearchTimer);
+      historySearchTimer = setTimeout(renderHistory, 250);
+    };
     $('lks-profile').onchange = e => {
       setActiveProfile(e.target.value);
       $('s-criteria').value = CFG.criteria;
