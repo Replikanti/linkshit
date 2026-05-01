@@ -546,7 +546,7 @@
     panel.innerHTML = `
       <div id="lks-resize"></div>
       <header>
-        <span>Linkshit · <select id="lks-profile" title="Active profile"></select></span>
+        <span>Linkshit<span id="lks-profile-wrap" style="display:none"> · Profile: <select id="lks-profile" title="Active profile"></select></span></span>
         <span>
           <button id="lks-start" class="primary">Start</button>
           <button id="lks-pause">Pause</button>
@@ -682,6 +682,11 @@
         if (p.name === profiles.activeName) opt.selected = true;
         sel.append(opt);
       }
+      // Hide the whole "· Profile: [select]" affordance when a single profile
+      // exists — at that point the dropdown is just a confusing title-suffix
+      // with one inert option. It pops back the moment the user creates a
+      // second profile in ⚙.
+      $('lks-profile-wrap').style.display = profiles.list.length > 1 ? '' : 'none';
     }
     refreshProfileSelector();
 
