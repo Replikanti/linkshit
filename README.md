@@ -20,22 +20,30 @@ anything else.
 
 ### 1. Run the installer
 
-Download `install.sh` from the [latest release](https://github.com/Replikanti/linkshit/releases/latest), then in a terminal:
+Grab the right file from the [latest release](https://github.com/Replikanti/linkshit/releases/latest):
+
+**macOS:** download `install.command`. Double-click it.
+
+> First time you double-click, macOS Gatekeeper may say *"cannot be opened
+> because it is from an unidentified developer"*. Right-click the file →
+> **Open** → **Open** in the dialog. You only have to do this once.
+
+**Linux:** download `install.sh` and run it:
 
 ```bash
 bash ~/Downloads/install.sh
 ```
 
-The installer will:
+The installer handles everything in one go:
 
-1. Verify Node.js 22+ is installed (and tell you where to get it if not).
-2. Install the `claude` CLI globally (Claude Code; ships your Pro/Max OAuth login).
-3. Drop `host.js` into `~/.linkshit/`.
-4. Register Chrome's native messaging manifest in the right OS-specific path.
-
-If the script tells you to log in to Claude Code first, open a new terminal,
-run `claude`, finish the sign-in flow in your browser, type `/exit`, then
-re-run `install.sh`.
+1. Verifies Node.js 22+ is installed (and points you at nodejs.org if not).
+2. Installs the `claude` CLI globally if missing.
+3. **Detects whether you're already logged in to Claude Code.** If not, it
+   opens the sign-in flow in your browser; the installer continues
+   automatically once you finish — no second terminal, no `/exit`, no manual
+   re-run.
+4. Drops `host.js` into `~/.linkshit/`.
+5. Registers Chrome's native messaging manifest in the right OS-specific path.
 
 ### 2. Load the extension in Chrome
 

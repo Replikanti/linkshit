@@ -81,11 +81,19 @@ jobs:
         run: |
           # gh release create's `path#label` syntax sets a UI label only —
           # the actual asset filename comes from the path. README points
-          # users at install.sh, so rename the built artifact to that.
+          # users at install.sh / install.command, so rename the built
+          # artifact accordingly.
+          #
+          # install.sh and install.command are byte-identical. The .command
+          # extension is recognised by macOS Finder so a user can
+          # double-click it to run in Terminal; on Linux that doesn't apply
+          # so we keep .sh too.
           mkdir -p release-assets
           cp "web-ext-artifacts/linkshit-extension-${GITHUB_REF_NAME}.zip" release-assets/
           cp host.js release-assets/host.js
           cp installers/install.release.sh release-assets/install.sh
+          cp installers/install.release.sh release-assets/install.command
+          chmod +x release-assets/install.sh release-assets/install.command
           ls -la release-assets/
 
       - name: Create GitHub Release with assets
@@ -97,4 +105,5 @@ jobs:
             --generate-notes \
             "release-assets/linkshit-extension-${GITHUB_REF_NAME}.zip" \
             "release-assets/host.js" \
-            "release-assets/install.sh"
+            "release-assets/install.sh" \
+            "release-assets/install.command"
