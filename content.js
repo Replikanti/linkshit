@@ -273,6 +273,8 @@
       border-top:1px solid #eee;border-bottom:1px solid #eee}
     #lks-panel .counters{padding:6px 12px;font-size:11px;color:#666;display:flex;gap:12px;
       border-bottom:1px solid #eee}
+    #lks-panel .hint{padding:10px 12px;font-size:12px;color:#444;background:#f6f9ff;
+      border-bottom:1px solid #eee;line-height:1.45}
     #lks-panel .result{padding:8px 0;border-bottom:1px solid #f0f0f0}
     #lks-panel .result .author{font-weight:600}
     #lks-panel .result .score{float:right;background:#0a66c2;color:#fff;padding:1px 6px;
@@ -307,6 +309,9 @@
         <span>hits <b id="lks-c-hits">0</b></span>
       </div>
       <div class="status" id="lks-status">Idle.</div>
+      <div class="hint" id="lks-hint" style="display:none">
+        Set your <b>Criteria</b> in <b>⚙</b> → click <b>Start</b> to begin scoring your feed.
+      </div>
       <div class="body" id="lks-body"></div>
       <div class="body" id="lks-settings" style="display:none;border-top:1px solid #eee;">
         <label>Criteria</label><textarea id="s-criteria" rows="5"></textarea>
@@ -341,7 +346,7 @@
     };
     sync();
 
-    $('lks-start').onclick = () => startScroll();
+    $('lks-start').onclick = () => { hideHint(); startScroll(); };
     $('lks-stop').onclick = () => { stopScroll(); maybeFlush(true); };
     $('lks-cog').onclick = () => {
       const s = $('lks-settings');
@@ -378,10 +383,13 @@
     };
 
     function setStatus(s) { $('lks-status').textContent = s; }
+    function showHint() { $('lks-hint').style.display = 'block'; }
+    function hideHint() { $('lks-hint').style.display = 'none'; }
     function bump(name, n) {
       counters[name] = (counters[name] || 0) + n;
       const el = $('lks-c-' + name);
       if (el) el.textContent = counters[name];
+      if (name === 'hits' || name === 'scored') hideHint();
     }
     function addResult(post) {
       if (rendered.has(post.urn)) return;
@@ -405,7 +413,7 @@
       );
       if (after) after.before(div); else body.append(div);
     }
-    return { setStatus, bump, addResult };
+    return { setStatus, bump, addResult, showHint, hideHint };
   })();
 
   // ---------- Boot ----------
@@ -413,6 +421,8 @@
     startObserver();
     const past = await dbAllScored(CFG.scoreThresh);
     for (const p of past.slice(0, 50)) ui.addResult(p);
+    const anyStored = await dbAllScored(0);
+    if (anyStored.length === 0) ui.showHint();
     ui.setStatus('Ready. Click Start.');
   })();
 })();
