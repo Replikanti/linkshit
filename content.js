@@ -242,10 +242,13 @@
   }
 
   // ---------- Scroller (human-like pacing) ----------
-  let scrollTimer = null, lastH = 0, stable = 0, postsAtStart = 0;
+  let scrollTimer = null, lastH = 0, stable = 0, postsAtStart = 0, paused = false;
   function startScroll() {
     if (scrollTimer) return;
-    postsAtStart = seen.size;
+    // Resuming from a pause keeps the original maxPosts baseline so the
+    // session as a whole still respects the cap; a fresh start resets it.
+    if (!paused) postsAtStart = seen.size;
+    paused = false;
     const tick = () => {
       if (!scrollTimer) return;
       window.scrollTo(0, document.body.scrollHeight);
@@ -267,11 +270,22 @@
     };
     scrollTimer = setTimeout(tick, 500);
     ui.setStatus('Scrolling…');
+    ui.refreshControls();
+  }
+  function pauseScroll() {
+    if (!scrollTimer) return;
+    clearTimeout(scrollTimer);
+    scrollTimer = null;
+    paused = true;
+    ui.setStatus('Paused.');
+    ui.refreshControls();
   }
   function stopScroll() {
     if (scrollTimer) clearTimeout(scrollTimer);
     scrollTimer = null;
+    paused = false;
     ui.setStatus('Stopped.');
+    ui.refreshControls();
   }
 
   // ---------- UI ----------
@@ -346,6 +360,7 @@
         <span>Linkshit</span>
         <span>
           <button id="lks-start" class="primary">Start</button>
+          <button id="lks-pause">Pause</button>
           <button id="lks-stop">Stop</button>
           <button id="lks-cog">⚙</button>
         </span>
@@ -397,6 +412,7 @@
     sync();
 
     $('lks-start').onclick = () => { hideHint(); startScroll(); };
+    $('lks-pause').onclick = () => pauseScroll();
     $('lks-stop').onclick = () => { stopScroll(); maybeFlush(true); };
     $('lks-cog').onclick = () => {
       const s = $('lks-settings');
@@ -440,6 +456,11 @@
     function setStatus(s) { $('lks-status').textContent = s; }
     function showHint() { $('lks-hint').style.display = 'block'; }
     function hideHint() { $('lks-hint').style.display = 'none'; }
+    function refreshControls() {
+      $('lks-start').textContent = paused ? 'Resume' : 'Start';
+      $('lks-pause').disabled = !scrollTimer;
+    }
+    refreshControls();
     function bump(name, n) {
       counters[name] = (counters[name] || 0) + n;
       const el = $('lks-c-' + name);
@@ -468,7 +489,7 @@
       );
       if (after) after.before(div); else body.append(div);
     }
-    return { setStatus, bump, addResult, showHint, hideHint };
+    return { setStatus, bump, addResult, showHint, hideHint, refreshControls };
   })();
 
   // ---------- Boot ----------
