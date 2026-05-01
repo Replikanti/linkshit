@@ -145,16 +145,35 @@
   }
 
   // ---------- Extractor ----------
-  // LinkedIn rewrites these CSS class names occasionally. If captured count
-  // stays at 0, open DevTools and find the new selectors.
-  const firstLine = s => (s || '').trim().split('\n')[0].trim();
-  // Sponsored posts are marked by a small "Promoted" / "Sponsored" label
-  // inside the post header (actor block). Restrict the scan to that block
-  // so an organic post that happens to use the word in its body is not
-  // misclassified.
+  // LinkedIn periodically rewrites the feed DOM. If captured stays at 0
+  // open DevTools on linkedin.com/feed/ and locate the new feed container
+  // (currently `[data-testid="mainFeed"]`) and post markers (currently
+  // `[data-testid="expandable-text-box"]` for body, `a[href*="/in/"]` for
+  // author). The pattern: pick attributes you can sanity-check via
+  // distribution counts, not class names — class names are hashed as of
+  // 2026-05.
+  const FEED_SEL = '[data-testid="mainFeed"]';
+  const POST_TEXT_SEL = '[data-testid="expandable-text-box"]';
+  const AUTHOR_SEL = 'a[href*="/in/"], a[href*="/company/"]';
+
+  // djb2 — short stable string hash for synthesizing a URN-equivalent
+  // dedup key. The new DOM no longer carries `urn:li:activity:` so we
+  // hash (author profile URL + first 200 chars of post text) instead.
+  // Collision risk: same author posting the exact same opening 200
+  // chars twice — vanishingly rare and would be a duplicate post anyway.
+  function djb2(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) {
+      h = Math.trunc((h << 5) + h + s.charCodeAt(i));
+    }
+    return (h >>> 0).toString(36);
+  }
+  // Sponsored posts carry a small "Promoted" / "Sponsored" label somewhere
+  // inside the post wrapper. The old DOM scoped this to .update-components-actor;
+  // that scope no longer exists, so scan the whole wrapper. Exact-string
+  // match keeps body text using the words from being misclassified.
   function isPromoted(el) {
-    const actor = el.querySelector('.update-components-actor') || el;
-    for (const node of actor.querySelectorAll('span, div')) {
+    for (const node of el.querySelectorAll('span, div')) {
       const t = (node.textContent || '').trim();
       if (t === 'Promoted' || t === 'Sponsored') return true;
     }
@@ -190,13 +209,11 @@
     return null;
   }
   function extractAgeHours(el) {
-    const actor = el.querySelector('.update-components-actor') || el;
-    const subdesc = actor.querySelector('.update-components-actor__sub-description');
-    if (subdesc) {
-      const h = parseAgeHours(subdesc.innerText);
-      if (h != null) return h;
-    }
-    for (const node of actor.querySelectorAll('span')) {
+    // Best-effort scan over short text nodes inside the post wrapper.
+    // The previous .update-components-actor__sub-description anchor is
+    // dead. Default maxAgeHours=0 disables this path entirely so a noisy
+    // match here does not affect users who have not opted in.
+    for (const node of el.querySelectorAll('span')) {
       const t = (node.textContent || '').trim();
       if (!t || t.length > 30) continue;
       const h = parseAgeHours(t);
@@ -205,25 +222,34 @@
     return null;
   }
   function extractPost(el) {
-    const urn = el.dataset.urn || el.dataset.id || '';
-    if (!urn.startsWith('urn:li:activity:')) return null;
-    const authorEl =
-      el.querySelector('.update-components-actor__title') ||
-      el.querySelector('.update-components-actor__name') ||
-      el.querySelector('a.app-aware-link span[aria-hidden="true"]');
-    const subtitleEl = el.querySelector('.update-components-actor__description');
-    const textEl =
-      el.querySelector('.update-components-text') ||
-      el.querySelector('.feed-shared-update-v2__description') ||
-      el.querySelector('.feed-shared-inline-show-more-text');
-    const reactEl = el.querySelector('.social-details-social-counts__reactions-count');
+    const textEl = el.querySelector(POST_TEXT_SEL);
+    if (!textEl) return null;
+    const authorLink = el.querySelector(AUTHOR_SEL);
+    if (!authorLink) return null;
+    const authorRaw = (authorLink.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+    const author = authorRaw[0];
+    if (!author) return null;
+    const text = (textEl.innerText || '').trim();
+    if (!text || text.length < 30) return null;
+    const subtitle = authorRaw.slice(1).join(' · ').slice(0, 200);
+    // Real post permalink if present (rare in the new DOM, kept as a
+    // best-effort) — fall back to the author profile so "Open on
+    // LinkedIn →" lands somewhere relevant.
+    const permaLink = el.querySelector('a[href*="/feed/update/"]') || el.querySelector('a[href*="/posts/"]');
+    const url = permaLink?.href || authorLink.href;
+    // Synthetic URN for IndexedDB key + dedup. Stable per (author, text).
+    const urn = 'lks:' + djb2(authorLink.href + '|' + text.slice(0, 200));
     return {
       urn,
-      author: firstLine(authorEl?.innerText),
-      subtitle: firstLine(subtitleEl?.innerText),
-      text: (textEl?.innerText || '').trim(),
-      reactions: reactEl ? Number.parseInt(reactEl.innerText.replaceAll(/\D/g, '') || '0', 10) : 0,
-      url: `https://www.linkedin.com/feed/update/${urn}/`,
+      author,
+      subtitle,
+      text,
+      // Reactions count moved out of the public DOM in the 2026-05 rewrite.
+      // Set to 0 so default minReactions=0 still admits the post; a
+      // stricter minReactions setting will currently reject everything,
+      // which is documented limitation until we identify the new marker.
+      reactions: 0,
+      url,
       capturedAt: Date.now(),
       status: 'new',
     };
@@ -393,16 +419,24 @@
     }
   }
   function startObserver() {
-    const sel = '[data-urn^="urn:li:activity:"], [data-id^="urn:li:activity:"]';
-    const root = document.querySelector('main') || document.body;
-    new MutationObserver(muts => {
-      for (const m of muts) for (const n of m.addedNodes) {
-        if (n.nodeType !== 1) continue;
-        if (n.matches?.(sel)) tryCapture(n);
-        n.querySelectorAll?.(sel).forEach(tryCapture);
+    // The feed list is rendered lazily by LinkedIn's React shell, often
+    // after document_idle. Poll for it; once mounted, observe its direct
+    // children (each post wrapper is one child of [data-testid="mainFeed"])
+    // and seed with whatever children are already there.
+    const attach = () => {
+      const feed = document.querySelector(FEED_SEL);
+      if (!feed) {
+        setTimeout(attach, 1000);
+        return;
       }
-    }).observe(root, { childList: true, subtree: true });
-    document.querySelectorAll(sel).forEach(tryCapture);
+      new MutationObserver(muts => {
+        for (const m of muts) for (const n of m.addedNodes) {
+          if (n.nodeType === 1) tryCapture(n);
+        }
+      }).observe(feed, { childList: true });
+      for (const child of feed.children) tryCapture(child);
+    };
+    attach();
   }
 
   // ---------- Scroller (human-like pacing) ----------
