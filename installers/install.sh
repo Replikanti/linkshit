@@ -86,30 +86,53 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 echo "✓ Claude Code: $(claude --version 2>/dev/null || echo installed)"
 
-# ---------- Step 3: Confirm OAuth login ----------
-cat <<EOF
+# ---------- Step 3: Claude Code login ----------
+echo
+echo "Checking your Claude Code login..."
 
-Linkshit needs your Claude Code account to be already logged in
+# `claude auth status --json` (default) prints `"loggedIn": true|false`.
+# Free check — does not consume subscription quota.
+is_logged_in() {
+  claude auth status 2>/dev/null | grep -q '"loggedIn"[[:space:]]*:[[:space:]]*true'
+}
+
+if is_logged_in; then
+  email=$(claude auth status 2>/dev/null | grep -oE '"email"[[:space:]]*:[[:space:]]*"[^"]+"' | sed -E 's/.*"([^"]+)"$/\1/' || true)
+  if [ -n "${email}" ]; then
+    echo "✓ Already logged in as ${email}"
+  else
+    echo "✓ Already logged in"
+  fi
+else
+  cat <<'EOF'
+
+Not logged in yet — Linkshit will now open Claude Code's sign-in flow.
+Your browser will pop up so you can sign in with your Anthropic account
 (Pro or Max subscription — there are no API tokens involved).
-
-If you have not logged in yet:
-  1. Open a new terminal window
-  2. Run:    claude
-  3. Complete the sign-in flow that opens in your browser
-  4. Type    /exit    to leave the chat
-  5. Come back here
+The installer will continue automatically once you're done.
 
 EOF
-# Tolerate EOF (Ctrl-D, or `bash install.sh </dev/null`) so `set -e` doesn't
-# kill the script with no message; treat silent stdin as "no".
-read -r -p "Are you already logged in to Claude Code? [y/N] " logged_in || logged_in=""
-case "${logged_in}" in
-  [Yy]*) ;;
-  *)
-    echo "OK — log in first, then re-run this installer."
-    exit 0
-    ;;
-esac
+  # Tolerate EOF (Ctrl-D, or `bash install.sh </dev/null`).
+  read -r -p "Press Enter to start the login (or Ctrl-C to cancel)..." _ || true
+
+  if ! claude auth login; then
+    cat <<EOF >&2
+
+ERROR: Claude Code login failed.
+Run \`claude auth login\` manually, then re-run this installer.
+EOF
+    exit 1
+  fi
+  if ! is_logged_in; then
+    cat <<EOF >&2
+
+ERROR: Claude Code reports it is still not logged in.
+Run \`claude auth login\` manually, then re-run this installer.
+EOF
+    exit 1
+  fi
+  echo "✓ Logged in"
+fi
 
 # ---------- Step 4: Install host.js ----------
 echo
