@@ -55,6 +55,41 @@
   };
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+  // ---------- Criteria profiles ----------
+  // localStorage shape:
+  //   linkshit.profiles      → [{name, criteria}]
+  //   linkshit.activeProfile → name (string)
+  // CFG.criteria mirrors the active profile so the rest of the pipeline
+  // (scoreBatch) keeps reading CFG.criteria with no awareness of profiles.
+  const profiles = { list: [], activeName: '' };
+  (function loadProfiles() {
+    let raw;
+    try { raw = JSON.parse(localStorage.getItem(NS + 'profiles')); } catch { /* corrupt */ }
+    if (!Array.isArray(raw) || raw.length === 0
+        || !raw.every(p => p && typeof p.name === 'string' && typeof p.criteria === 'string')) {
+      raw = [{ name: 'Default', criteria: CFG.criteria || DEFAULTS.criteria }];
+    }
+    profiles.list = raw;
+    const stored = localStorage.getItem(NS + 'activeProfile');
+    profiles.activeName = stored && raw.find(p => p.name === stored) ? stored : raw[0].name;
+    CFG.criteria = profiles.list.find(p => p.name === profiles.activeName).criteria;
+    persistProfiles();
+  })();
+  function persistProfiles() {
+    localStorage.setItem(NS + 'profiles', JSON.stringify(profiles.list));
+    localStorage.setItem(NS + 'activeProfile', profiles.activeName);
+  }
+  function activeProfile() {
+    return profiles.list.find(p => p.name === profiles.activeName);
+  }
+  function setActiveProfile(name) {
+    const p = profiles.list.find(x => x.name === name);
+    if (!p) return;
+    profiles.activeName = p.name;
+    CFG.criteria = p.criteria;
+    persistProfiles();
+  }
+
   // ---------- IndexedDB ----------
   const DB_NAME = 'linkshit', STORE = 'posts';
   const dbReady = new Promise((res, rej) => {
@@ -441,6 +476,8 @@
       display:flex;justify-content:space-between;align-items:center;cursor:move;
       user-select:none}
     #lks-panel header button{cursor:pointer}
+    #lks-panel header select{cursor:pointer;font:inherit;background:var(--field-bg);
+      color:var(--fg);border:1px solid var(--field-border);border-radius:3px;padding:1px 4px}
     #lks-panel #lks-resize{position:absolute;left:0;top:0;bottom:0;width:6px;
       cursor:ew-resize;background:transparent;z-index:1}
     #lks-panel .body{padding:8px 12px;overflow-y:auto;flex:1}
@@ -481,7 +518,7 @@
     panel.innerHTML = `
       <div id="lks-resize"></div>
       <header>
-        <span>Linkshit</span>
+        <span>Linkshit · <select id="lks-profile" title="Active profile"></select></span>
         <span>
           <button id="lks-start" class="primary">Start</button>
           <button id="lks-pause">Pause</button>
@@ -503,7 +540,13 @@
       </div>
       <div class="body" id="lks-body"></div>
       <div class="body" id="lks-settings" style="display:none;border-top:1px solid #eee;">
-        <label>Criteria</label><textarea id="s-criteria" rows="5"></textarea>
+        <label>Criteria (active profile)</label><textarea id="s-criteria" rows="5"></textarea>
+        <div style="margin:2px 0 6px">
+          <button id="s-profile-new">New profile</button>
+          <button id="s-profile-rename">Rename</button>
+          <button id="s-profile-dup">Duplicate</button>
+          <button id="s-profile-del">Delete</button>
+        </div>
         <label>Pre-filter keywords (comma-separated)</label><input id="s-keywords"/>
         <label>Author allowlist (comma-separated substrings)</label><input id="s-authors"/>
         <label>Min reactions</label><input id="s-minReactions" type="number"/>
@@ -592,6 +635,19 @@
     // scroll-into-view of the same post don't produce duplicate rows.
     const rendered = new Set();
 
+    function refreshProfileSelector() {
+      const sel = $('lks-profile');
+      sel.innerHTML = '';
+      for (const p of profiles.list) {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = p.name;
+        if (p.name === profiles.activeName) opt.selected = true;
+        sel.append(opt);
+      }
+    }
+    refreshProfileSelector();
+
     const sync = () => {
       $('s-criteria').value = CFG.criteria;
       $('s-keywords').value = CFG.keywords.join(', ');
@@ -611,12 +667,67 @@
     $('lks-start').onclick = () => { hideHint(); startScroll(); };
     $('lks-pause').onclick = () => pauseScroll();
     $('lks-stop').onclick = () => { stopScroll(); maybeFlush(true); };
+    $('lks-profile').onchange = e => {
+      setActiveProfile(e.target.value);
+      $('s-criteria').value = CFG.criteria;
+      setStatus(`Profile: ${profiles.activeName}`);
+    };
+    $('s-profile-new').onclick = () => {
+      const name = (prompt('New profile name:') || '').trim();
+      if (!name) return;
+      if (profiles.list.some(p => p.name === name)) { alert('A profile with that name already exists.'); return; }
+      profiles.list.push({ name, criteria: '' });
+      profiles.activeName = name;
+      CFG.criteria = '';
+      persistProfiles();
+      refreshProfileSelector();
+      $('s-criteria').value = '';
+      setStatus(`Profile: ${name}`);
+    };
+    $('s-profile-rename').onclick = () => {
+      const cur = activeProfile();
+      const name = (prompt('Rename profile to:', cur.name) || '').trim();
+      if (!name || name === cur.name) return;
+      if (profiles.list.some(p => p.name === name)) { alert('A profile with that name already exists.'); return; }
+      cur.name = name;
+      profiles.activeName = name;
+      persistProfiles();
+      refreshProfileSelector();
+      setStatus(`Renamed to ${name}`);
+    };
+    $('s-profile-dup').onclick = () => {
+      const cur = activeProfile();
+      const name = (prompt('Name for the duplicate:', cur.name + ' copy') || '').trim();
+      if (!name) return;
+      if (profiles.list.some(p => p.name === name)) { alert('A profile with that name already exists.'); return; }
+      profiles.list.push({ name, criteria: cur.criteria });
+      profiles.activeName = name;
+      persistProfiles();
+      refreshProfileSelector();
+      setStatus(`Profile: ${name}`);
+    };
+    $('s-profile-del').onclick = () => {
+      if (profiles.list.length <= 1) { alert('Cannot delete the only profile.'); return; }
+      const cur = activeProfile();
+      if (!confirm(`Delete profile "${cur.name}"?`)) return;
+      profiles.list = profiles.list.filter(p => p.name !== cur.name);
+      profiles.activeName = profiles.list[0].name;
+      CFG.criteria = profiles.list[0].criteria;
+      persistProfiles();
+      refreshProfileSelector();
+      $('s-criteria').value = CFG.criteria;
+      setStatus(`Profile: ${profiles.activeName}`);
+    };
     $('lks-cog').onclick = () => {
       const s = $('lks-settings');
       s.style.display = s.style.display === 'none' ? 'block' : 'none';
     };
     $('s-save').onclick = () => {
-      SAVE('criteria', $('s-criteria').value);
+      // Criteria belongs to the active profile, not the global CFG bucket.
+      const text = $('s-criteria').value;
+      activeProfile().criteria = text;
+      CFG.criteria = text;
+      persistProfiles();
       SAVE('keywords', $('s-keywords').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('authors', $('s-authors').value.split(',').map(s => s.trim()).filter(Boolean));
       SAVE('minReactions', Number.parseInt($('s-minReactions').value, 10) || 0);
