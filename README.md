@@ -114,9 +114,9 @@ in `manifest.json`).
 ## Prerequisites
 
 - **Node.js 22+** (the host runs on Node, ships with no runtime deps).
-- **[Claude Code](https://docs.claude.com/en/docs/claude-code)** installed
-  and signed in with a Pro or Max account (`claude` once interactively to
-  complete the OAuth login).
+- A Claude **Pro or Max subscription**. The installer handles installing
+  the [Claude Code](https://docs.claude.com/en/docs/claude-code) CLI and
+  the OAuth sign-in for you — you don't need to set it up beforehand.
 - **Google Chrome** (or Chromium-based browser with MV3 support).
 
 ## Manual setup (developer-grade)
