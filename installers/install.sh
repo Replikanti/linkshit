@@ -161,8 +161,9 @@ if [ "${#LINKSHIT_HOST_JS_BASE64}" -lt 200 ]; then
 ERROR: failed to download host.js from ${URL}.
 
 If no release exists yet, this is expected — please use the released
-install.sh from the Releases page instead, which embeds host.js inline
-and needs no network. https://github.com/Replikanti/linkshit/releases
+installer from the Releases page (\`install.sh\` on Linux,
+\`install.command\` on macOS), which embeds host.js inline and needs
+no network. https://github.com/Replikanti/linkshit/releases
 EOF
     exit 1
   fi

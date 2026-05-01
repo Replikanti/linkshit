@@ -275,9 +275,9 @@ The browser-side code never changes.
 |---|---|
 | Panel never appears | Extension not loaded, or you're on a non-`www` LinkedIn subdomain. Check `chrome://extensions`. Reload the LinkedIn tab. |
 | `captured` stuck at 0 | Selector drift. See Risks. |
-| `Error: native host disconnected before responding (is it installed?)` | Chrome can't find `host.js`. The native messaging manifest is missing, or its `path` is wrong. Re-check step 3 of Setup. |
+| `Error: native host disconnected before responding (is it installed?)` | Chrome can't find `host.js`. The native messaging manifest is missing or pointing at the wrong path. Re-run `install.sh` / `install.command`, or follow "Manual setup → 3. Register the native messaging host". |
 | `Error: failed to connect to native host: …` | Same family — manifest exists but Chrome rejected it. Often the `allowed_origins` doesn't list the right extension ID. Confirm the extension ID at `chrome://extensions` matches `pgcnimcldmdfkemofhjfnemieckciche`. |
-| `Error: claude exit …` | `claude` not in PATH or not logged in. Run `claude` manually first. |
+| `Error: claude exit …` | `claude` not in PATH or not logged in. Run `claude auth status` to check; `claude auth login` to fix the login. |
 | Quota exhausted mid-session | See Cost / quota. |
 | `Error: claude exit 1` with no stderr | Try `CLAUDE_MODEL=sonnet` — `haiku` may not be available on your plan. Edit `~/.linkshit/host.js` and set `MODEL` accordingly, or wrap `host.js` in a tiny script that exports the env var before exec'ing the real one. |
 
