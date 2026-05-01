@@ -103,6 +103,18 @@
   // LinkedIn rewrites these CSS class names occasionally. If captured count
   // stays at 0, open DevTools and find the new selectors.
   const firstLine = s => (s || '').trim().split('\n')[0].trim();
+  // Sponsored posts are marked by a small "Promoted" / "Sponsored" label
+  // inside the post header (actor block). Restrict the scan to that block
+  // so an organic post that happens to use the word in its body is not
+  // misclassified.
+  function isPromoted(el) {
+    const actor = el.querySelector('.update-components-actor') || el;
+    for (const node of actor.querySelectorAll('span, div')) {
+      const t = (node.textContent || '').trim();
+      if (t === 'Promoted' || t === 'Sponsored') return true;
+    }
+    return false;
+  }
   function extractPost(el) {
     const urn = el.dataset.urn || el.dataset.id || '';
     if (!urn.startsWith('urn:li:activity:')) return null;
@@ -199,6 +211,10 @@
     const post = extractPost(el);
     if (!post || seen.has(post.urn)) return;
     seen.add(post.urn);
+    if (isPromoted(el)) {
+      ui.bump('promoted', 1);
+      return;
+    }
     const ex = await dbGet(post.urn);
     if (ex?.status === 'scored') {
       if (ex.score >= CFG.scoreThresh) ui.addResult(ex);
@@ -304,6 +320,7 @@
       </header>
       <div class="counters">
         <span>captured <b id="lks-c-captured">0</b></span>
+        <span>promoted <b id="lks-c-promoted">0</b></span>
         <span>queued <b id="lks-c-queued">0</b></span>
         <span>scored <b id="lks-c-scored">0</b></span>
         <span>hits <b id="lks-c-hits">0</b></span>
@@ -329,7 +346,7 @@
       </div>`;
     document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
-    const counters = { captured: 0, queued: 0, scored: 0, hits: 0 };
+    const counters = { captured: 0, promoted: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
     // scroll-into-view of the same post don't produce duplicate rows.
     const rendered = new Set();
