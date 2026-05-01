@@ -96,6 +96,15 @@ POSTS:
 ${list}`;
 }
 
+// Patterns observed in claude CLI / Anthropic API errors when the user's
+// usage-window or rate limit is exhausted. Match conservatively — false
+// positives only mean the panel shows a "Quota hit" status instead of a
+// generic error, which is still informative.
+const QUOTA_PATTERN = /rate.?limit|quota|usage limit|5.?hour limit|429|too many requests/i;
+function classifyClaudeError(stderr) {
+  return QUOTA_PATTERN.test(stderr || '') ? 'quota_exhausted' : null;
+}
+
 // Swap point. Replace this body to use a different LLM backend.
 function runLLM(prompt) {
   return new Promise((resolve, reject) => {
@@ -107,9 +116,17 @@ function runLLM(prompt) {
     proc.stdout.on('data', c => { out += c; });
     proc.stderr.on('data', c => { err += c; });
     proc.on('error', reject);
-    proc.on('close', code =>
-      code === 0 ? resolve(out) : reject(new Error(err.trim() || `claude exit ${code}`))
-    );
+    proc.on('close', code => {
+      if (code === 0) {
+        resolve(out);
+        return;
+      }
+      const e = new Error(err.trim() || `claude exit ${code}`);
+      e.classification = classifyClaudeError(err);
+      e.exitCode = code;
+      e.stderr = err.trim();
+      reject(e);
+    });
   });
 }
 
@@ -140,7 +157,9 @@ async function handle(msg) {
     const arr = parseJsonArray(out);
     return { ok: true, result: arr };
   } catch (e) {
-    return { ok: false, error: e.message };
+    const env = { ok: false, error: e.message };
+    if (e.classification) env.code = e.classification;
+    return env;
   }
 }
 
