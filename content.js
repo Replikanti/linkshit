@@ -263,6 +263,46 @@
     }
   }
 
+  // ---------- Rescore (re-run scoring against current criteria) ----------
+  async function rescoreAll() {
+    const stored = await dbAllScored(0);
+    if (stored.length === 0) {
+      ui.setStatus('Nothing to rescore.');
+      return;
+    }
+    const batches = Math.ceil(stored.length / CFG.batchSize);
+    if (!confirm(
+      `Re-score ${stored.length} stored posts in ~${batches} batches with current criteria?\n\n`
+      + 'This will consume LLM quota.',
+    )) return;
+
+    const wasRunning = !!scrollTimer;
+    if (wasRunning) pauseScroll();
+    ui.clearResults();
+
+    for (let i = 0; i < stored.length; i += CFG.batchSize) {
+      const batch = stored.slice(i, i + CFG.batchSize);
+      ui.setStatus(`Rescoring ${i + 1}-${i + batch.length} of ${stored.length}…`);
+      try {
+        const scored = await scoreBatch(batch);
+        for (const s of scored) {
+          await dbPut(s);
+          if (s.score >= CFG.scoreThresh) {
+            ui.addResult(s);
+          } else if (CFG.showBorderline && s.score >= CFG.scoreThresh - CFG.borderlineDelta) {
+            ui.addResult({ ...s, borderline: true });
+          }
+        }
+      } catch (e) {
+        ui.setStatus(`Rescore failed: ${e.message}`);
+        if (wasRunning) startScroll();
+        return;
+      }
+    }
+    ui.setStatus(`Rescored ${stored.length}.`);
+    if (wasRunning) startScroll();
+  }
+
   // ---------- Capture (MutationObserver) ----------
   const seen = new Set();
   async function tryCapture(el) {
@@ -477,6 +517,7 @@
         <label>Max posts per session</label><input id="s-maxPosts" type="number"/>
         <button id="s-save" class="primary">Save</button>
         <button id="s-cancel">Cancel</button>
+        <button id="s-rescore">Rescore stored</button>
         <button id="s-clear">Clear DB</button>
       </div>`;
     document.body.append(panel);
@@ -595,6 +636,7 @@
       $('lks-settings').style.display = 'none';
       setStatus('Settings unchanged.');
     };
+    $('s-rescore').onclick = () => rescoreAll();
     $('s-clear').onclick = async () => {
       if (!confirm('Wipe all stored posts and scores?')) return;
       const db = await dbReady;
@@ -615,6 +657,12 @@
     function setStatus(s) { $('lks-status').textContent = s; }
     function showHint() { $('lks-hint').style.display = 'block'; }
     function hideHint() { $('lks-hint').style.display = 'none'; }
+    function clearResults() {
+      $('lks-body').innerHTML = '';
+      rendered.clear();
+      counters.hits = 0;
+      $('lks-c-hits').textContent = '0';
+    }
     function refreshControls() {
       $('lks-start').textContent = paused ? 'Resume' : 'Start';
       $('lks-pause').disabled = !scrollTimer;
@@ -648,7 +696,7 @@
       );
       if (after) after.before(div); else body.append(div);
     }
-    return { setStatus, bump, addResult, showHint, hideHint, refreshControls };
+    return { setStatus, bump, addResult, showHint, hideHint, refreshControls, clearResults };
   })();
 
   // ---------- Boot ----------
