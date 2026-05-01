@@ -119,15 +119,31 @@
   // LinkedIn renders post age as relative text (2h, 3d, 1mo, 2y) in the
   // actor sub-description. Returns hours or null when unparseable; null
   // is treated as "do not filter" (defensive — would rather over-include).
-  // Alternation order in the regex matters: "mo" must precede "m"
-  // otherwise "1mo" parses as 1 minute.
-  const AGE_UNITS = { s: 1 / 3600, min: 1 / 60, m: 1 / 60, h: 1, d: 24, w: 168, mo: 720, y: 8760 };
+  // The unit table starts with the longer keys so "mo" / "min" beat "m".
+  // String-based dispatch (instead of one alternation regex) keeps the
+  // hot path linear and avoids ReDoS-leaning patterns.
+  const AGE_UNITS = [
+    ['mo', 720],
+    ['min', 1 / 60],
+    ['s', 1 / 3600],
+    ['m', 1 / 60],
+    ['h', 1],
+    ['d', 24],
+    ['w', 168],
+    ['y', 8760],
+  ];
   function parseAgeHours(text) {
     if (!text) return null;
-    const m = text.match(/(\d+)\s*(mo|min|[smhdwy])\b/i);
-    if (!m) return null;
-    const factor = AGE_UNITS[m[2].toLowerCase()];
-    return factor == null ? null : Number.parseInt(m[1], 10) * factor;
+    const digits = /(\d+)/.exec(text);
+    if (!digits) return null;
+    const n = Number.parseInt(digits[1], 10);
+    if (!Number.isFinite(n)) return null;
+    const rest = text.slice(digits.index + digits[0].length).trimStart().toLowerCase();
+    if (!rest) return null;
+    for (const [unit, factor] of AGE_UNITS) {
+      if (rest.startsWith(unit)) return n * factor;
+    }
+    return null;
   }
   function extractAgeHours(el) {
     const actor = el.querySelector('.update-components-actor') || el;
