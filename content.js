@@ -103,6 +103,11 @@
     const idx = db.transaction(STORE, 'readonly').objectStore(STORE).index('score');
     return cursorAll(idx, IDBKeyRange.lowerBound(min));
   }
+  async function dbAllQueued() {
+    const db = await dbReady;
+    const idx = db.transaction(STORE, 'readonly').objectStore(STORE).index('status');
+    return cursorAll(idx, IDBKeyRange.only('queued'));
+  }
 
   // ---------- Extractor ----------
   // LinkedIn rewrites these CSS class names occasionally. If captured count
@@ -283,12 +288,19 @@
       }
       return;
     }
-    await dbPut(post);
+    if (ex?.status === 'queued') {
+      // Already drained from disk into the in-memory queue at boot; nothing to do.
+      return;
+    }
     ui.bump('captured', 1);
     if (preFilter(post)) {
+      post.status = 'queued';
+      await dbPut(post);
       queue.push(post);
       ui.bump('queued', 1);
       maybeFlush();
+    } else {
+      await dbPut(post);
     }
   }
   function startObserver() {
@@ -641,6 +653,15 @@
 
   // ---------- Boot ----------
   (async () => {
+    // Drain any queued-but-not-scored posts left over from a previous session
+    // BEFORE starting the observer, so the observer can't race on the same
+    // URN. seen.add prevents a later DOM re-encounter from re-queueing.
+    const queuedFromDisk = await dbAllQueued();
+    for (const p of queuedFromDisk) {
+      seen.add(p.urn);
+      queue.push(p);
+      ui.bump('queued', 1);
+    }
     startObserver();
     const lowerBound = CFG.showBorderline
       ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
@@ -651,6 +672,8 @@
     }
     const anyStored = await dbAllScored(0);
     if (anyStored.length === 0) ui.showHint();
-    ui.setStatus('Ready. Click Start.');
+    ui.setStatus(queuedFromDisk.length > 0
+      ? `Ready. ${queuedFromDisk.length} carried over — click Start.`
+      : 'Ready. Click Start.');
   })();
 })();
