@@ -375,7 +375,11 @@
         --shadow:0 4px 16px rgba(0,0,0,.5)}
     }
     #lks-panel header{padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-weight:600;
-      display:flex;justify-content:space-between;align-items:center}
+      display:flex;justify-content:space-between;align-items:center;cursor:move;
+      user-select:none}
+    #lks-panel header button{cursor:pointer}
+    #lks-panel #lks-resize{position:absolute;left:0;top:0;bottom:0;width:6px;
+      cursor:ew-resize;background:transparent;z-index:1}
     #lks-panel .body{padding:8px 12px;overflow-y:auto;flex:1}
     #lks-panel button{padding:4px 10px;margin-left:4px;border:1px solid var(--btn-border);
       background:var(--btn-bg);color:var(--fg);
@@ -408,6 +412,7 @@
     const panel = document.createElement('div');
     panel.id = 'lks-panel';
     panel.innerHTML = `
+      <div id="lks-resize"></div>
       <header>
         <span>Linkshit</span>
         <span>
@@ -447,6 +452,71 @@
       </div>`;
     document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
+
+    // ---------- Geometry: drag-to-move + resize-from-left, persisted ----------
+    const GEOM_KEY = NS + 'panel.geometry';
+    const MIN_W = 280, MAX_W = 720, MIN_VISIBLE_X = 100, MIN_VISIBLE_Y = 60;
+    function applyGeom(g) {
+      panel.style.right = '';
+      panel.style.left = g.left + 'px';
+      panel.style.top = g.top + 'px';
+      panel.style.width = g.width + 'px';
+    }
+    function saveGeom() {
+      const r = panel.getBoundingClientRect();
+      localStorage.setItem(GEOM_KEY, JSON.stringify({
+        left: Math.round(r.left),
+        top: Math.round(r.top),
+        width: Math.round(r.width),
+      }));
+    }
+    try {
+      const raw = localStorage.getItem(GEOM_KEY);
+      if (raw) applyGeom(JSON.parse(raw));
+    } catch { /* ignore corrupt geometry */ }
+
+    function startDrag(e, onMove) {
+      e.preventDefault();
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        saveGeom();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+    panel.querySelector('header').addEventListener('mousedown', e => {
+      if (e.target.closest('button')) return;
+      const rect = panel.getBoundingClientRect();
+      const startX = e.clientX, startY = e.clientY;
+      const startLeft = rect.left, startTop = rect.top;
+      startDrag(e, e2 => {
+        const newLeft = Math.max(
+          MIN_VISIBLE_X - rect.width,
+          Math.min(window.innerWidth - MIN_VISIBLE_X, startLeft + e2.clientX - startX),
+        );
+        const newTop = Math.max(
+          0,
+          Math.min(window.innerHeight - MIN_VISIBLE_Y, startTop + e2.clientY - startY),
+        );
+        panel.style.right = '';
+        panel.style.left = newLeft + 'px';
+        panel.style.top = newTop + 'px';
+      });
+    });
+    $('lks-resize').addEventListener('mousedown', e => {
+      const rect = panel.getBoundingClientRect();
+      const startX = e.clientX;
+      const startWidth = rect.width, startLeft = rect.left;
+      startDrag(e, e2 => {
+        const dx = startX - e2.clientX;
+        const newWidth = Math.max(MIN_W, Math.min(MAX_W, startWidth + dx));
+        const widthDelta = newWidth - startWidth;
+        panel.style.right = '';
+        panel.style.left = (startLeft - widthDelta) + 'px';
+        panel.style.width = newWidth + 'px';
+      });
+    });
     const counters = { captured: 0, promoted: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
     // scroll-into-view of the same post don't produce duplicate rows.
