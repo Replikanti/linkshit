@@ -5,13 +5,15 @@
 // from its stdout. Stubs `claude` so the test doesn't depend on the user
 // being logged in to Claude Code or having network access.
 //
-// Asserts the four behaviors of the native messaging plumbing that we
+// Asserts the five behaviors of the native messaging plumbing that we
 // most want to keep working:
 //   1. happy-path scoring round-trip
 //   2. unknown message type is reported via {ok:false,error}
 //   3. missing posts is reported via {ok:false,error}
 //   4. malformed JSON inside a frame is reported via {ok:false,error}
 //      (not silently dropped — the bug fixed during PR-A's QA round)
+//   5. quota-exhausted stderr from claude is classified as
+//      {ok:false,error,code:'quota_exhausted'} (covers issue #26)
 //
 // Runs in the `native host smoke test` job in extras.yml on every PR
 // and push to main, and locally via `npm run smoke`.
@@ -26,11 +28,27 @@ const HOST_PATH = path.resolve(__dirname, '..', 'host.js');
 // Atomically create a temp dir owned only by us, then drop a stub `claude`
 // inside. Avoids the TOCTOU pitfall flagged by CodeQL on the previous
 // smoke script (which used a predictable os.tmpdir() + pid path).
+//
+// Counter-based stub so a single host process can drive both the happy-path
+// (call #1) and the quota-exhausted path (call #2). Cases that don't reach
+// runLLM (unknown type / missing posts / malformed JSON) don't advance the
+// counter — they short-circuit before claude is spawned.
 const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), 'linkshit-host-smoke-'));
 const stubPath = path.join(stubDir, 'claude');
+const counterPath = path.join(stubDir, 'counter');
 fs.writeFileSync(
   stubPath,
-  '#!/bin/bash\necho \'[{"id":1,"score":7,"reason":"stub-ok"}]\'\n',
+  '#!/bin/bash\n'
+  + `COUNTER='${counterPath}'\n`
+  + 'COUNT=$(cat "$COUNTER" 2>/dev/null || echo 0)\n'
+  + 'COUNT=$((COUNT + 1))\n'
+  + 'echo "$COUNT" > "$COUNTER"\n'
+  + 'if [ "$COUNT" = "1" ]; then\n'
+  + '  echo \'[{"id":1,"score":7,"reason":"stub-ok"}]\'\n'
+  + 'else\n'
+  + '  echo "Error: rate limit exceeded — try again in a few hours" >&2\n'
+  + '  exit 1\n'
+  + 'fi\n',
   { mode: 0o755 },
 );
 
@@ -128,7 +146,18 @@ async function checks() {
     fail(`malformed-json: expected error envelope, got ${JSON.stringify(r4)}`);
   }
 
-  console.log('SMOKE OK: 4/4 assertions passed');
+  // 5. quota-exhausted stderr is classified
+  sendFrame({
+    type: 'score',
+    criteria: 'smoke',
+    posts: [{ author: 'B', text: 'second batch second batch second batch', reactions: 0 }],
+  });
+  const r5 = await readFrame();
+  if (r5.ok || r5.code !== 'quota_exhausted' || !r5.error?.includes('rate limit')) {
+    fail(`quota-classification: expected {ok:false,code:'quota_exhausted',error:/rate limit/}, got ${JSON.stringify(r5)}`);
+  }
+
+  console.log('SMOKE OK: 5/5 assertions passed');
   cleanup();
   process.exit(0);
 }

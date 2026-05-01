@@ -247,7 +247,9 @@
       posts,
     });
     if (!response?.ok) {
-      throw new Error(response?.error || 'no response from native host');
+      const err = new Error(response?.error || 'no response from native host');
+      err.code = response?.code;
+      throw err;
     }
     const arr = response.result;
     if (!Array.isArray(arr)) {
@@ -265,7 +267,13 @@
   // already in flight, we still want to drain the remainder once the batch
   // completes — even if it's smaller than batchSize.
   let pendingForce = false;
+  // Set when the host returns code='quota_exhausted'. Blocks further flushes
+  // until the user clicks Resume (startScroll clears the flag) — without it,
+  // the auto re-flush at the end of maybeFlush would immediately retry and
+  // burn the next request against the still-exhausted limit.
+  let quotaPaused = false;
   async function maybeFlush(force = false) {
+    if (quotaPaused) return;
     if (force) pendingForce = true;
     if (scoring || queue.length === 0) return;
     if (queue.length < CFG.batchSize && !pendingForce) return;
@@ -286,13 +294,19 @@
       ui.setStatus(scrollTimer ? 'Scrolling…' : 'Idle.');
     } catch (e) {
       console.error('[Linkshit]', e);
-      ui.setStatus('Error: ' + e.message);
       for (const p of batch) queue.unshift(p);
-      await sleep(15000);
+      if (e.code === 'quota_exhausted') {
+        quotaPaused = true;
+        pauseScroll();
+        ui.setStatus('Quota hit; click Resume to retry.');
+      } else {
+        ui.setStatus('Error: ' + e.message);
+        await sleep(15000);
+      }
     } finally {
       scoring = false;
       if (queue.length === 0) pendingForce = false;
-      if (queue.length >= CFG.batchSize || (pendingForce && queue.length > 0)) {
+      if (!quotaPaused && (queue.length >= CFG.batchSize || (pendingForce && queue.length > 0))) {
         maybeFlush();
       }
     }
@@ -399,6 +413,13 @@
     // session as a whole still respects the cap; a fresh start resets it.
     if (!paused) postsAtStart = seen.size;
     paused = false;
+    // Manual Start / Resume always retries scoring after a quota stall —
+    // the user clicking the button is the explicit "try again" signal.
+    if (quotaPaused) {
+      quotaPaused = false;
+      // Drain any queue that piled up while quota-paused.
+      maybeFlush();
+    }
     const tick = () => {
       if (!scrollTimer) return;
       window.scrollTo(0, document.body.scrollHeight);

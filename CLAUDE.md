@@ -73,8 +73,9 @@ CI (`ci.yml`) runs check / validate / lint / pack on every push and PR. Extras
 native-host smoke test. CodeQL runs separately.
 
 There is no test runner / framework. The smoke test in `scripts/smoke-host.js`
-**is** the host's test suite — four assertions over the native messaging
-plumbing. Add cases there when you change `host.js`.
+**is** the host's test suite — five assertions over the native messaging
+plumbing (happy path, unknown type, missing posts, malformed JSON, and
+quota-exhausted classification). Add cases there when you change `host.js`.
 
 ## Build / pack
 
