@@ -77,6 +77,17 @@ jobs:
           fi
           echo "✓ install.release.sh built and verified (${#ENCODED} chars embedded)"
 
+      - name: Stage assets with their final user-facing names
+        run: |
+          # gh release create's `path#label` syntax sets a UI label only —
+          # the actual asset filename comes from the path. README points
+          # users at install.sh, so rename the built artifact to that.
+          mkdir -p release-assets
+          cp "web-ext-artifacts/linkshit-extension-${GITHUB_REF_NAME}.zip" release-assets/
+          cp host.js release-assets/host.js
+          cp installers/install.release.sh release-assets/install.sh
+          ls -la release-assets/
+
       - name: Create GitHub Release with assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -84,6 +95,6 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
-            "web-ext-artifacts/linkshit-extension-${GITHUB_REF_NAME}.zip" \
-            "host.js" \
-            "installers/install.release.sh#install.sh"
+            "release-assets/linkshit-extension-${GITHUB_REF_NAME}.zip" \
+            "release-assets/host.js" \
+            "release-assets/install.sh"
