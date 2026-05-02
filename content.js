@@ -32,7 +32,8 @@
     scrollMinMs: 3000,
     scrollMaxMs: 6000,
     batchSize: 8,
-    maxPosts: 1500,
+    maxPosts: 200,
+    autoReloadOnCap: true,
   };
   const CFG = {};
   for (const k of Object.keys(DEFAULTS)) {
@@ -595,7 +596,21 @@
         stable = 0; lastH = h;
       }
       if (seen.size - postsAtStart >= CFG.maxPosts) {
-        stopScroll(); ui.setStatus(`maxPosts=${CFG.maxPosts} reached.`); maybeFlush(true); return;
+        // LinkedIn does not virtualize its feed; long auto-scroll sessions
+        // grow the page DOM unbounded until the renderer crashes (#63).
+        // We can't stop LinkedIn from doing that, but we can recycle the
+        // tab on a fixed cadence so it never reaches the crash zone. Queue
+        // and IDB persist across the reload so the next boot continues
+        // from where this one stopped.
+        stopScroll();
+        maybeFlush(true);
+        if (CFG.autoReloadOnCap) {
+          ui.setStatus(`Session cap (${CFG.maxPosts}) reached. Refreshing tab in 5s to recycle LinkedIn DOM…`);
+          setTimeout(() => globalThis.location.reload(), 5000);
+        } else {
+          ui.setStatus(`Session cap (${CFG.maxPosts}) reached. Refresh tab to continue.`);
+        }
+        return;
       }
       const delay = CFG.scrollMinMs + Math.random() * (CFG.scrollMaxMs - CFG.scrollMinMs);
       scrollTimer = setTimeout(tick, delay);
