@@ -422,6 +422,10 @@
       }
       const ex = await dbGet(post.urn);
       if (ex?.status === 'scored') {
+        // Re-encountering a post the LLM already scored in a previous
+        // session counts toward `scored` so the panel invariant
+        // hits ≤ scored holds across reloads.
+        ui.bump('scored', 1);
         if (ex.score >= CFG.scoreThresh) ui.addResult(ex);
         else if (CFG.showBorderline && ex.score >= CFG.scoreThresh - CFG.borderlineDelta) {
           ui.addResult({ ...ex, borderline: true });
@@ -1018,6 +1022,9 @@
       : CFG.scoreThresh;
     const past = await dbAllScored(lowerBound);
     for (const p of past.slice(0, 50)) {
+      // Bump `scored` for each past hit we surface so the panel invariant
+      // hits ≤ scored holds at boot before any fresh scoring runs.
+      ui.bump('scored', 1);
       ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true });
     }
     const anyStored = await dbAllScored(0);
