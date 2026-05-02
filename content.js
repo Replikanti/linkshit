@@ -317,16 +317,32 @@
   // the auto re-flush at the end of maybeFlush would immediately retry and
   // burn the next request against the still-exhausted limit.
   let quotaPaused = false;
+  // Bounded retry on non-quota scoring errors. Without this the catch path
+  // re-queues the failed batch, sleeps 15 s, and the finally block calls
+  // maybeFlush() recursively — same batch fails again, every 15 s, forever.
+  // In a background tab where Chrome MV3 kills the service worker, every
+  // batch fails until the user refocuses, and the deferred retries fire in
+  // a thunderstorm when they do. After 3 consecutive non-quota failures we
+  // pause exactly like the quota path; manual Resume clears the flag.
+  let scoringStalled = false;
+  let consecutiveErrors = 0;
+  const MAX_CONSECUTIVE_ERRORS = 3;
   async function maybeFlush(force = false) {
-    if (quotaPaused) return;
+    if (quotaPaused || scoringStalled) return;
     if (force) pendingForce = true;
     if (scoring || queue.length === 0) return;
     if (queue.length < CFG.batchSize && !pendingForce) return;
+    // Don't burn CPU on hidden tabs — Chrome throttles setTimeout to ~1/min
+    // there but the recursive promise chain doesn't care, leading to
+    // backpressure when the user refocuses. Resumed automatically on
+    // visibilitychange.
+    if (document.visibilityState === 'hidden') return;
     scoring = true;
     const batch = queue.splice(0, CFG.batchSize);
     ui.setStatus(`Scoring ${batch.length} (${queue.length} queued)…`);
     try {
       const scored = await scoreBatch(batch);
+      consecutiveErrors = 0;
       for (const s of scored) {
         await dbPut(s);
         if (s.score >= CFG.scoreThresh) {
@@ -345,17 +361,34 @@
         pauseScroll();
         ui.setStatus('Quota hit; click Resume to retry.');
       } else {
-        ui.setStatus('Error: ' + e.message);
-        await sleep(15000);
+        consecutiveErrors++;
+        if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+          scoringStalled = true;
+          pauseScroll();
+          ui.setStatus(`Scoring stalled after ${consecutiveErrors} errors; click Resume.`);
+        } else {
+          ui.setStatus(`Error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}): ${e.message}`);
+          await sleep(15000);
+        }
       }
     } finally {
       scoring = false;
       if (queue.length === 0) pendingForce = false;
-      if (!quotaPaused && (queue.length >= CFG.batchSize || (pendingForce && queue.length > 0))) {
+      if (!quotaPaused && !scoringStalled
+          && (queue.length >= CFG.batchSize || (pendingForce && queue.length > 0))) {
         maybeFlush();
       }
     }
   }
+  // Background-tab CPU starvation watchdog. When Chrome refocuses the tab
+  // after long inactivity, deferred timers fire in a burst. Resuming
+  // scoring here is fine; the bounded retry counter and visibility check
+  // in maybeFlush prevent the burst from spiralling.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && !quotaPaused && !scoringStalled) {
+      maybeFlush();
+    }
+  });
 
   // ---------- Rescore (re-run scoring against current criteria) ----------
   async function rescoreAll() {
@@ -521,15 +554,26 @@
     // session as a whole still respects the cap; a fresh start resets it.
     if (!paused) postsAtStart = seen.size;
     paused = false;
-    // Manual Start / Resume always retries scoring after a quota stall —
-    // the user clicking the button is the explicit "try again" signal.
-    if (quotaPaused) {
+    // Manual Start / Resume always retries scoring after a stall — the
+    // user clicking the button is the explicit "try again" signal. Same
+    // for the bounded-retry stall path.
+    if (quotaPaused || scoringStalled) {
       quotaPaused = false;
-      // Drain any queue that piled up while quota-paused.
+      scoringStalled = false;
+      consecutiveErrors = 0;
+      // Drain any queue that piled up while paused.
       maybeFlush();
     }
     const tick = () => {
       if (!scrollTimer) return;
+      // Skip ticks while the tab is hidden — the LLM can't see anything
+      // useful and Chrome throttles us anyway. Resumed automatically when
+      // the user returns to the tab.
+      if (document.visibilityState === 'hidden') {
+        const delay = CFG.scrollMinMs + Math.random() * (CFG.scrollMaxMs - CFG.scrollMinMs);
+        scrollTimer = setTimeout(tick, delay);
+        return;
+      }
       // The 2026-05 React rewrite moved scroll out of document.body into a
       // flex-grow <main>; window.scrollTo / body.scrollHeight are no-ops on
       // that DOM and the height-stable check trips after the initial render.
