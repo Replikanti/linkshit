@@ -490,16 +490,24 @@
     }
     const tick = () => {
       if (!scrollTimer) return;
-      window.scrollTo(0, document.body.scrollHeight);
+      // The 2026-05 React rewrite moved scroll out of document.body into a
+      // flex-grow <main>; window.scrollTo / body.scrollHeight are no-ops on
+      // that DOM and the height-stable check trips after the initial render.
+      // Resolve the real container per tick (cheap, survives <main>
+      // re-mount) and fall back to the document scroller / body so older
+      // or future LinkedIn variants that scroll the document still work.
+      const scroller = document.querySelector('main') || document.scrollingElement || document.body;
+      scroller.scrollTo(0, scroller.scrollHeight);
       document.querySelectorAll('button').forEach(b => {
         const t = (b.innerText || '').toLowerCase();
         if (t.includes('load more comment') || t.includes('show more replies')
          || t.includes('zobrazit další') || t.includes('načíst předchozí')) b.click();
       });
-      if (document.body.scrollHeight === lastH) {
+      const h = scroller.scrollHeight;
+      if (h === lastH) {
         if (++stable > 6) { stopScroll(); ui.setStatus('End of feed.'); maybeFlush(true); return; }
       } else {
-        stable = 0; lastH = document.body.scrollHeight;
+        stable = 0; lastH = h;
       }
       if (seen.size - postsAtStart >= CFG.maxPosts) {
         stopScroll(); ui.setStatus(`maxPosts=${CFG.maxPosts} reached.`); maybeFlush(true); return;
