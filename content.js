@@ -996,11 +996,19 @@
       if (el) el.textContent = counters[name];
       if (name === 'hits' || name === 'scored') hideHint();
     }
+    // Cap visible result cards to bound panel DOM growth in long sessions.
+    // History view (dbAllScored) still surfaces everything stored. Insert
+    // order is score-descending; eviction drops the lowest-score card from
+    // the tail. seen.add prevents tryCapture from re-walking the urn within
+    // this session, so evicted posts only re-render via the boot history
+    // loop on a future page load.
+    const MAX_PANEL_RESULTS = 200;
     function addResult(post) {
       if (rendered.has(post.urn)) return;
       rendered.add(post.urn);
       if (!post.borderline) bump('hits', 1);
       const div = document.createElement('div');
+      div.dataset.urn = post.urn;
       div.className = post.borderline ? 'result borderline' : 'result';
       div.innerHTML = `
         <div><span class="score"></span><span class="author"></span></div>
@@ -1017,6 +1025,11 @@
         c => Number.parseInt(c.querySelector('.score').textContent, 10) < post.score
       );
       if (after) after.before(div); else body.append(div);
+      while (body.children.length > MAX_PANEL_RESULTS) {
+        const last = body.lastElementChild;
+        if (last.dataset.urn) rendered.delete(last.dataset.urn);
+        last.remove();
+      }
     }
     return { setStatus, bump, addResult, showHint, hideHint, refreshControls, clearResults };
   })();
