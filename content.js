@@ -599,16 +599,21 @@
         // LinkedIn does not virtualize its feed; long auto-scroll sessions
         // grow the page DOM unbounded until the renderer crashes (#63).
         // We can't stop LinkedIn from doing that, but we can recycle the
-        // tab on a fixed cadence so it never reaches the crash zone. Queue
-        // and IDB persist across the reload so the next boot continues
-        // from where this one stopped.
+        // tab on a fixed cadence so it never reaches the crash zone.
+        //
+        // This is NOT a hard session limit. Queue and IDB persist across
+        // the reload, the resume flag below tells the next boot to call
+        // startScroll() automatically once the queue is drained, and the
+        // user effectively gets a continuous session — just bounced
+        // through periodic invisible DOM recycles.
         stopScroll();
         maybeFlush(true);
         if (CFG.autoReloadOnCap) {
-          ui.setStatus(`Session cap (${CFG.maxPosts}) reached. Refreshing tab in 5s to recycle LinkedIn DOM…`);
+          localStorage.setItem(NS + 'resumeOnBoot', '1');
+          ui.setStatus(`Recycling LinkedIn DOM (every ${CFG.maxPosts} posts) — refreshing tab in 5s, scrolling will auto-resume…`);
           setTimeout(() => globalThis.location.reload(), 5000);
         } else {
-          ui.setStatus(`Session cap (${CFG.maxPosts}) reached. Refresh tab to continue.`);
+          ui.setStatus(`Cap (${CFG.maxPosts}) reached. Refresh tab to continue.`);
         }
         return;
       }
@@ -1118,8 +1123,19 @@
     }
     const anyStored = await dbAllScored(0);
     if (anyStored.length === 0) ui.showHint();
-    ui.setStatus(queuedFromDisk.length > 0
-      ? `Ready. ${queuedFromDisk.length} carried over — click Start.`
-      : 'Ready. Click Start.');
+    // Auto-resume after a DOM-recycle reload. The previous session segment
+    // hit maxPosts and bounced the tab; pick up scrolling automatically so
+    // the user sees a continuous capture session despite the reload.
+    if (localStorage.getItem(NS + 'resumeOnBoot') === '1') {
+      localStorage.removeItem(NS + 'resumeOnBoot');
+      ui.setStatus('Resuming after DOM recycle…');
+      // Wait a beat for the feed to mount and any queued posts to start
+      // flowing through the observer; then kick scrolling.
+      setTimeout(() => startScroll(), 1500);
+    } else {
+      ui.setStatus(queuedFromDisk.length > 0
+        ? `Ready. ${queuedFromDisk.length} carried over — click Start.`
+        : 'Ready. Click Start.');
+    }
   })();
 })();
