@@ -400,73 +400,77 @@
   // ---------- Capture (MutationObserver) ----------
   const seen = new Set();
   async function tryCapture(el) {
-    const post = extractPost(el);
-    if (!post || seen.has(post.urn)) return;
-    seen.add(post.urn);
-    if (isPromoted(el)) {
-      ui.bump('promoted', 1);
-      return;
-    }
-    if (CFG.maxAgeHours > 0) {
-      const age = extractAgeHours(el);
-      if (age != null && age > CFG.maxAgeHours) {
-        ui.bump('tooOld', 1);
+    // seen.add happens before the await on dbGet, so an unhandled rejection
+    // there would leave the urn permanently dedup-skipped without ever
+    // reaching the captured bump. One bad IDB record (e.g. a stale entry
+    // from a prior urn scheme) would freeze the counter for that post.
+    // Catch and warn so the pipeline keeps moving.
+    try {
+      const post = extractPost(el);
+      if (!post || seen.has(post.urn)) return;
+      seen.add(post.urn);
+      if (isPromoted(el)) {
+        ui.bump('promoted', 1);
         return;
       }
-    }
-    const ex = await dbGet(post.urn);
-    if (ex?.status === 'scored') {
-      if (ex.score >= CFG.scoreThresh) ui.addResult(ex);
-      else if (CFG.showBorderline && ex.score >= CFG.scoreThresh - CFG.borderlineDelta) {
-        ui.addResult({ ...ex, borderline: true });
+      if (CFG.maxAgeHours > 0) {
+        const age = extractAgeHours(el);
+        if (age != null && age > CFG.maxAgeHours) {
+          ui.bump('tooOld', 1);
+          return;
+        }
       }
-      return;
-    }
-    if (ex?.status === 'queued') {
-      // Already drained from disk into the in-memory queue at boot; nothing to do.
-      return;
-    }
-    ui.bump('captured', 1);
-    if (preFilter(post)) {
-      post.status = 'queued';
-      await dbPut(post);
-      queue.push(post);
-      ui.bump('queued', 1);
-      maybeFlush();
-    } else {
-      await dbPut(post);
+      const ex = await dbGet(post.urn);
+      if (ex?.status === 'scored') {
+        if (ex.score >= CFG.scoreThresh) ui.addResult(ex);
+        else if (CFG.showBorderline && ex.score >= CFG.scoreThresh - CFG.borderlineDelta) {
+          ui.addResult({ ...ex, borderline: true });
+        }
+        return;
+      }
+      if (ex?.status === 'queued') {
+        // Already drained from disk into the in-memory queue at boot; nothing to do.
+        return;
+      }
+      ui.bump('captured', 1);
+      if (preFilter(post)) {
+        post.status = 'queued';
+        await dbPut(post);
+        queue.push(post);
+        ui.bump('queued', 1);
+        maybeFlush();
+      } else {
+        await dbPut(post);
+      }
+    } catch (e) {
+      console.warn('[linkshit] tryCapture failed:', e);
     }
   }
   function startObserver() {
-    // The feed list is rendered lazily by LinkedIn's React shell, often
-    // after document_idle. Post wrappers in the 2026-05 DOM are not
-    // direct children of [data-testid="mainFeed"] — text-boxes sit ~8
-    // levels deep inside a handful of section wrappers. Observing only
-    // childList on feed therefore misses every lazy-mount below. Watch
-    // the whole subtree and rescan over [data-testid="expandable-text-box"]
-    // on each batch; the djb2 urn dedup makes rescans cheap and idempotent.
-    const attach = () => {
+    // The feed list is rendered lazily by LinkedIn's React shell. Two earlier
+    // attempts (subtree on the feed wrapper) failed in production: LinkedIn
+    // periodically re-mounts the feed element, which leaves any observer
+    // bound to the old node detached and silent. We watch document.body
+    // instead — it outlives every feed re-render — and re-query the feed
+    // inside the debounced rescan so a fresh wrapper is picked up
+    // automatically. The 250 ms debounce + djb2 urn dedup keep the cost
+    // bounded even though body mutates on every LinkedIn UI tick.
+    let pending = false;
+    const rescan = () => {
+      pending = false;
       const feed = document.querySelector(FEED_SEL);
-      if (!feed) {
-        setTimeout(attach, 1000);
-        return;
+      if (!feed) return;
+      for (const tb of feed.querySelectorAll(POST_TEXT_SEL)) {
+        const wrapper = findWrapper(tb, feed);
+        if (wrapper) tryCapture(wrapper);
       }
-      let pending = false;
-      const rescan = () => {
-        pending = false;
-        for (const tb of feed.querySelectorAll(POST_TEXT_SEL)) {
-          const wrapper = findWrapper(tb, feed);
-          if (wrapper) tryCapture(wrapper);
-        }
-      };
-      new MutationObserver(() => {
-        if (pending) return;
-        pending = true;
-        setTimeout(rescan, 150);
-      }).observe(feed, { childList: true, subtree: true });
-      rescan();
     };
-    attach();
+    new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      setTimeout(rescan, 250);
+    }).observe(document.body, { childList: true, subtree: true });
+    rescan();
   }
 
   // ---------- Scroller (human-like pacing) ----------
