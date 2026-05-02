@@ -568,10 +568,11 @@
       if (!scrollTimer) return;
       // Skip ticks while the tab is hidden — the LLM can't see anything
       // useful and Chrome throttles us anyway. Resumed automatically when
-      // the user returns to the tab.
+      // the user returns to the tab. No jitter here: we are just polling
+      // visibility, not pretending to be a human, and the visibilitychange
+      // listener wakes us up immediately on refocus.
       if (document.visibilityState === 'hidden') {
-        const delay = CFG.scrollMinMs + Math.random() * (CFG.scrollMaxMs - CFG.scrollMinMs);
-        scrollTimer = setTimeout(tick, delay);
+        scrollTimer = setTimeout(tick, 30000);
         return;
       }
       // The 2026-05 React rewrite moved scroll out of document.body into a
