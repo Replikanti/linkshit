@@ -221,14 +221,33 @@
     }
     return null;
   }
+  // Walk up from a post-text element to the smallest ancestor that also
+  // contains an author link — that is the post wrapper. Stops at feed
+  // itself so we never escape into the page chrome. Used by capture to
+  // turn each [data-testid="expandable-text-box"] into a wrapper that
+  // extractPost / isPromoted / extractAgeHours all operate on.
+  function findWrapper(textBox, feed) {
+    let n = textBox.parentElement;
+    while (n && n !== feed) {
+      if (n.querySelector(AUTHOR_SEL)) return n;
+      n = n.parentElement;
+    }
+    return null;
+  }
   function extractPost(el) {
     const textEl = el.querySelector(POST_TEXT_SEL);
     if (!textEl) return null;
-    const authorLink = el.querySelector(AUTHOR_SEL);
+    // Each post carries ~2 author links: an avatar wrapper around an
+    // <img> (first in DOM order, empty innerText) and the name link.
+    // Pick the first link whose innerText has a non-empty first line so
+    // the avatar wrapper does not poison the author field.
+    let authorLink = null, authorRaw = null;
+    for (const a of el.querySelectorAll(AUTHOR_SEL)) {
+      const raw = (a.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
+      if (raw[0]) { authorLink = a; authorRaw = raw; break; }
+    }
     if (!authorLink) return null;
-    const authorRaw = (authorLink.innerText || '').split('\n').map(l => l.trim()).filter(Boolean);
     const author = authorRaw[0];
-    if (!author) return null;
     const text = (textEl.innerText || '').trim();
     if (!text || text.length < 30) return null;
     const subtitle = authorRaw.slice(1).join(' · ').slice(0, 200);
@@ -420,21 +439,32 @@
   }
   function startObserver() {
     // The feed list is rendered lazily by LinkedIn's React shell, often
-    // after document_idle. Poll for it; once mounted, observe its direct
-    // children (each post wrapper is one child of [data-testid="mainFeed"])
-    // and seed with whatever children are already there.
+    // after document_idle. Post wrappers in the 2026-05 DOM are not
+    // direct children of [data-testid="mainFeed"] — text-boxes sit ~8
+    // levels deep inside a handful of section wrappers. Observing only
+    // childList on feed therefore misses every lazy-mount below. Watch
+    // the whole subtree and rescan over [data-testid="expandable-text-box"]
+    // on each batch; the djb2 urn dedup makes rescans cheap and idempotent.
     const attach = () => {
       const feed = document.querySelector(FEED_SEL);
       if (!feed) {
         setTimeout(attach, 1000);
         return;
       }
-      new MutationObserver(muts => {
-        for (const m of muts) for (const n of m.addedNodes) {
-          if (n.nodeType === 1) tryCapture(n);
+      let pending = false;
+      const rescan = () => {
+        pending = false;
+        for (const tb of feed.querySelectorAll(POST_TEXT_SEL)) {
+          const wrapper = findWrapper(tb, feed);
+          if (wrapper) tryCapture(wrapper);
         }
-      }).observe(feed, { childList: true });
-      for (const child of feed.children) tryCapture(child);
+      };
+      new MutationObserver(() => {
+        if (pending) return;
+        pending = true;
+        setTimeout(rescan, 150);
+      }).observe(feed, { childList: true, subtree: true });
+      rescan();
     };
     attach();
   }
