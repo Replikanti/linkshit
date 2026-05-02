@@ -471,6 +471,20 @@
     // the document (rare but possible), the next rescan re-attaches.
     // Falls back to document.body when <main> is not yet present so the
     // first paint window still works.
+    // Marker-based fast-skip on text-box nodes. Without this the rescan
+    // re-runs extractPost / isPromoted (each a querySelectorAll) for every
+    // visible post on every tick — ~30-50 wrappers × ~3 rescans/sec = 90-150
+    // parallel async tryCapture invocations/sec, each allocating a Promise
+    // and an IDB transaction. Suspected cause of #63 Symptom A (tab crash
+    // around captured ~230 even after the <main>-scoped observer in #66).
+    //
+    // Stamping the text-box element itself means LinkedIn's virtualization
+    // (it unmounts off-screen posts and remounts new ones) automatically
+    // resets the marker for any genuinely new node. urn-based dedup in
+    // tryCapture stays as the second line of defense for the same post text
+    // re-mounted under a different DOM node.
+    const RESCAN_MARK = '__lksRescanProcessed';
+    const DEBOUNCE_MS = 500;
     let pending = false;
     let observed = null;
     let observer = null;
@@ -483,13 +497,15 @@
         observer = new MutationObserver(() => {
           if (pending) return;
           pending = true;
-          setTimeout(rescan, 250);
+          setTimeout(rescan, DEBOUNCE_MS);
         });
         observer.observe(observed, { childList: true, subtree: true });
       }
       const feed = document.querySelector(FEED_SEL);
       if (!feed) return;
       for (const tb of feed.querySelectorAll(POST_TEXT_SEL)) {
+        if (tb[RESCAN_MARK]) continue;
+        tb[RESCAN_MARK] = true;
         const wrapper = findWrapper(tb, feed);
         if (wrapper) tryCapture(wrapper);
       }
