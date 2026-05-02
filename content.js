@@ -450,14 +450,39 @@
     // The feed list is rendered lazily by LinkedIn's React shell. Two earlier
     // attempts (subtree on the feed wrapper) failed in production: LinkedIn
     // periodically re-mounts the feed element, which leaves any observer
-    // bound to the old node detached and silent. We watch document.body
-    // instead — it outlives every feed re-render — and re-query the feed
-    // inside the debounced rescan so a fresh wrapper is picked up
-    // automatically. The 250 ms debounce + djb2 urn dedup keep the cost
-    // bounded even though body mutates on every LinkedIn UI tick.
+    // bound to the old node detached and silent.
+    //
+    // PR #58 worked around that by observing document.body subtree:true.
+    // That caught everything but is the suspected cause of long-session
+    // tab crashes (#63 Symptom A) — body subtree fires on every animation,
+    // hover, video buffer, and unrelated React update across the whole
+    // page, allocating MutationRecord arrays at browser-tick rate.
+    //
+    // <main> is the document layout container, sits above the React app,
+    // and outlives feed re-mounts. Subtree observation rooted at <main>
+    // still catches every text-box mount that PR #58 needed but ignores
+    // header / left rail / chat panel / video chrome traffic.
+    //
+    // Defensive: if we ever observe an element that gets detached from
+    // the document (rare but possible), the next rescan re-attaches.
+    // Falls back to document.body when <main> is not yet present so the
+    // first paint window still works.
     let pending = false;
+    let observed = null;
+    let observer = null;
     const rescan = () => {
       pending = false;
+      const root = document.querySelector('main') || document.body;
+      if (root !== observed || (observed && !document.contains(observed))) {
+        if (observer) observer.disconnect();
+        observed = root;
+        observer = new MutationObserver(() => {
+          if (pending) return;
+          pending = true;
+          setTimeout(rescan, 250);
+        });
+        observer.observe(observed, { childList: true, subtree: true });
+      }
       const feed = document.querySelector(FEED_SEL);
       if (!feed) return;
       for (const tb of feed.querySelectorAll(POST_TEXT_SEL)) {
@@ -465,11 +490,6 @@
         if (wrapper) tryCapture(wrapper);
       }
     };
-    new MutationObserver(() => {
-      if (pending) return;
-      pending = true;
-      setTimeout(rescan, 250);
-    }).observe(document.body, { childList: true, subtree: true });
     rescan();
   }
 
