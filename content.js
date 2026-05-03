@@ -853,6 +853,7 @@
     #lks-panel .result .reason::before{content:"Why this score: ";font-weight:600;color:var(--primary)}
     #lks-panel .result .reason:empty{display:none}
     #lks-panel .result .snippet{color:var(--snippet);font-size:12px;max-height:64px;overflow:hidden}
+    #lks-panel .result .when{color:var(--muted);font-size:10px;margin-top:2px}
     #lks-panel .result a{color:var(--primary);text-decoration:none;font-size:11px}
     #lks-panel .result .dismiss{float:right;margin-left:6px;background:transparent;border:none;color:var(--muted);
       cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
@@ -886,7 +887,8 @@
             <button id="lks-history-toggle">History</button>
           </span>
           <span class="btn-group">
-            <button id="lks-export-btn" title="Download all stored hits as JSON.">Export</button>
+            <button id="lks-export-csv-btn" title="Download all stored hits as CSV (Excel / Sheets-friendly).">CSV</button>
+            <button id="lks-export-json-btn" title="Download all stored hits as JSON (full fidelity, easier to re-import).">JSON</button>
             <button id="lks-clear-btn" title="Empty the visible panel. History view still has everything in IDB.">Clear All</button>
           </span>
         </div>
@@ -1061,6 +1063,18 @@
     // ---------- History view ----------
     let historyMode = false;
     let historySearchTimer = null;
+    // Format a captured-at timestamp (ms-since-epoch) for the result
+    // card. Locale-aware short date+time so users see "when did this
+    // post show up in my feed" at a glance. Tooltip carries the full
+    // ISO string for absolute precision.
+    function formatCapturedAt(ts) {
+      if (!ts) return null;
+      try {
+        return new Date(ts).toLocaleString(undefined, {
+          month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+        });
+      } catch { return null; }
+    }
     function renderHistoryRow(p) {
       const row = document.createElement('div');
       row.className = 'result';
@@ -1071,6 +1085,7 @@
         <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
+        <div class="when"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
       const scoreEl = row.querySelector('.score');
       scoreEl.textContent = `Score: ${p.score}/10`;
@@ -1080,6 +1095,12 @@
       row.querySelector('.author').textContent = p.author;
       row.querySelector('.reason').textContent = p.reason || '';
       row.querySelector('.snippet').textContent = (p.text || '').slice(0, 240);
+      const whenEl = row.querySelector('.when');
+      const when = formatCapturedAt(p.capturedAt);
+      if (when) {
+        whenEl.textContent = `Captured ${when}`;
+        whenEl.title = new Date(p.capturedAt).toISOString();
+      }
       row.querySelector('a').href = p.url;
       row.querySelector('.dismiss').onclick = () => dismissResult(p.urn, row);
       return row;
@@ -1223,7 +1244,16 @@
       setStatus('Settings unchanged.');
     };
     $('s-rescore').onclick = () => rescoreAll();
-    $('lks-export-btn').onclick = async () => {
+    function downloadBlob(content, mime, ext) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `linkshit-export-${new Date().toISOString().slice(0, 10)}.${ext}`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    $('lks-export-json-btn').onclick = async () => {
       const all = await dbAllScored(0);
       const payload = {
         exported_at: new Date().toISOString(),
@@ -1242,14 +1272,38 @@
           captured_at: p.capturedAt,
         })),
       };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `linkshit-export-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setStatus(`Exported ${all.length} posts.`);
+      downloadBlob(JSON.stringify(payload, null, 2), 'application/json', 'json');
+      setStatus(`Exported ${all.length} posts (JSON).`);
+    };
+    $('lks-export-csv-btn').onclick = async () => {
+      const all = await dbAllScored(0);
+      // RFC 4180 escape: wrap fields with comma / quote / newline in
+      // double-quotes; double the inner quotes. Excel / Sheets read this
+      // straight without configuration.
+      const csvEscape = v => {
+        if (v == null) return '';
+        const s = String(v);
+        if (/[",\n\r]/.test(s)) return '"' + s.replaceAll('"', '""') + '"';
+        return s;
+      };
+      const cols = ['score', 'author', 'subtitle', 'reason', 'url', 'status', 'captured_at', 'text'];
+      const rows = [cols.join(',')];
+      // BOM so Excel opens UTF-8 correctly without prompting.
+      const header = '﻿';
+      for (const p of all) {
+        rows.push([
+          csvEscape(p.score),
+          csvEscape(p.author),
+          csvEscape(p.subtitle),
+          csvEscape(p.reason),
+          csvEscape(p.url),
+          csvEscape(p.status),
+          csvEscape(p.capturedAt ? new Date(p.capturedAt).toISOString() : ''),
+          csvEscape(p.text),
+        ].join(','));
+      }
+      downloadBlob(header + rows.join('\r\n'), 'text/csv;charset=utf-8', 'csv');
+      setStatus(`Exported ${all.length} posts (CSV).`);
     };
     $('lks-clear-btn').onclick = () => {
       $('lks-body').innerHTML = '';
@@ -1349,6 +1403,7 @@
         <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
+        <div class="when"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
       const scoreEl = div.querySelector('.score');
       scoreEl.textContent = `Score: ${post.score}/10`;
@@ -1358,6 +1413,12 @@
       div.querySelector('.author').textContent = post.author;
       div.querySelector('.reason').textContent = post.reason;
       div.querySelector('.snippet').textContent = post.text.slice(0, 240);
+      const whenEl = div.querySelector('.when');
+      const when = formatCapturedAt(post.capturedAt);
+      if (when) {
+        whenEl.textContent = `Captured ${when}`;
+        whenEl.title = new Date(post.capturedAt).toISOString();
+      }
       div.querySelector('a').href = post.url;
       div.querySelector('.dismiss').onclick = () => dismissResult(post.urn, div);
       const body = $('lks-body');
