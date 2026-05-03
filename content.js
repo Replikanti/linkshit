@@ -46,7 +46,7 @@
     borderlineDelta: 2,
     scrollMinMs: 5000,
     scrollMaxMs: 10000,
-    batchSize: 8,
+    batchSize: 4,
     maxPosts: 50,
     autoReloadOnCap: true,
   };
