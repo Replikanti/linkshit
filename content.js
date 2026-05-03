@@ -519,6 +519,11 @@
         // Already drained from disk into the in-memory queue at boot; nothing to do.
         return;
       }
+      if (ex?.status === 'dismissed') {
+        // User explicitly dismissed this post in a previous session.
+        // Don't re-render, don't re-score, don't bump counters.
+        return;
+      }
       ui.bump('captured', 1);
       if (preFilter(post)) {
         post.status = 'queued';
@@ -814,6 +819,10 @@
     #lks-panel .result .reason{font-style:italic;color:var(--reason);margin:2px 0}
     #lks-panel .result .snippet{color:var(--snippet);font-size:12px;max-height:64px;overflow:hidden}
     #lks-panel .result a{color:var(--primary);text-decoration:none;font-size:11px}
+    #lks-panel .result .dismiss{float:right;margin-left:6px;background:transparent;border:none;color:var(--muted);
+      cursor:pointer;font-size:14px;line-height:1;padding:0 2px}
+    #lks-panel .result .dismiss:hover{color:var(--fg)}
+    #lks-panel .result.dismissed{opacity:.4}
     #lks-settings textarea,#lks-settings input{width:100%;box-sizing:border-box;
       margin:2px 0 6px;font-family:inherit;font-size:12px;
       background:var(--field-bg);color:var(--fg);border:1px solid var(--field-border);
@@ -882,6 +891,8 @@
         <button id="s-save" class="primary">Save</button>
         <button id="s-cancel">Cancel</button>
         <button id="s-rescore">Rescore stored</button>
+        <button id="s-export">Export JSON</button>
+        <button id="s-clear-panel">Clear panel</button>
         <button id="s-clear">Clear DB</button>
       </div>`;
     document.body.append(panel);
@@ -1000,9 +1011,11 @@
     function renderHistoryRow(p) {
       const row = document.createElement('div');
       row.className = 'result';
+      row.dataset.urn = p.urn;
       row.dataset.score = p.score;
+      if (p.status === 'dismissed') row.classList.add('dismissed');
       row.innerHTML = `
-        <div><span class="score"></span><span class="author"></span></div>
+        <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
@@ -1011,6 +1024,7 @@
       row.querySelector('.reason').textContent = p.reason || '';
       row.querySelector('.snippet').textContent = (p.text || '').slice(0, 240);
       row.querySelector('a').href = p.url;
+      row.querySelector('.dismiss').onclick = () => dismissResult(p.urn, row);
       return row;
     }
     async function renderHistory() {
@@ -1128,6 +1142,41 @@
       setStatus('Settings unchanged.');
     };
     $('s-rescore').onclick = () => rescoreAll();
+    $('s-export').onclick = async () => {
+      const all = await dbAllScored(0);
+      const payload = {
+        exported_at: new Date().toISOString(),
+        criteria_active: CFG.criteria,
+        profile_active: profiles.activeName,
+        count: all.length,
+        posts: all.map(p => ({
+          urn: p.urn,
+          author: p.author,
+          subtitle: p.subtitle,
+          text: p.text,
+          url: p.url,
+          score: p.score,
+          reason: p.reason,
+          status: p.status,
+          captured_at: p.capturedAt,
+        })),
+      };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `linkshit-export-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setStatus(`Exported ${all.length} posts.`);
+    };
+    $('s-clear-panel').onclick = () => {
+      $('lks-body').innerHTML = '';
+      rendered.clear();
+      counters.hits = 0;
+      $('lks-c-hits').textContent = '0';
+      setStatus('Panel cleared (IDB intact — see History).');
+    };
     $('s-clear').onclick = async () => {
       if (!confirm('Wipe all stored posts and scores?')) return;
       const db = await dbReady;
@@ -1144,6 +1193,19 @@
       }
       setStatus('DB cleared.');
     };
+    // Dismiss a single result. Marks the IDB record so future
+    // re-encounters silently skip it; the row is removed from the live
+    // panel and faded out of history. The seen Set already prevents
+    // tryCapture from re-walking the urn this session, so no extra
+    // dedup work is required here.
+    async function dismissResult(urn, rowEl) {
+      try {
+        const ex = await dbGet(urn);
+        if (ex) { ex.status = 'dismissed'; await dbPut(ex); }
+      } catch { /* fail-soft, the DOM removal is the user-visible part */ }
+      if (rowEl?.isConnected) rowEl.remove();
+      rendered.delete(urn);
+    }
 
     function setStatus(s) { $('lks-status').textContent = s; }
     function showHint() { $('lks-hint').style.display = 'block'; }
@@ -1190,7 +1252,7 @@
       div.dataset.score = post.score;
       div.className = post.borderline ? 'result borderline' : 'result';
       div.innerHTML = `
-        <div><span class="score"></span><span class="author"></span></div>
+        <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
@@ -1199,6 +1261,7 @@
       div.querySelector('.reason').textContent = post.reason;
       div.querySelector('.snippet').textContent = post.text.slice(0, 240);
       div.querySelector('a').href = post.url;
+      div.querySelector('.dismiss').onclick = () => dismissResult(post.urn, div);
       const body = $('lks-body');
       const after = [...body.children].find(
         c => Number.parseInt(c.dataset.score || '0', 10) < post.score
@@ -1229,7 +1292,7 @@
       ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
       : CFG.scoreThresh;
     const past = await dbAllScored(lowerBound);
-    for (const p of past.slice(0, 50)) {
+    for (const p of past.filter(x => x.status !== 'dismissed').slice(0, 50)) {
       // Bump `scored` for each past hit we surface so the panel invariant
       // hits ≤ scored holds at boot before any fresh scoring runs.
       ui.bump('scored', 1);
