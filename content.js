@@ -755,6 +755,7 @@
     scrollTimer = setTimeout(tick, 500);
     ui.setStatus('Scrolling…');
     ui.refreshControls();
+    ui.setPillRunning(true);
   }
   function pauseScroll() {
     if (!scrollTimer) return;
@@ -763,6 +764,7 @@
     paused = true;
     ui.setStatus('Paused.');
     ui.refreshControls();
+    ui.setPillRunning(false);
   }
   function stopScroll() {
     if (scrollTimer) clearTimeout(scrollTimer);
@@ -770,6 +772,7 @@
     paused = false;
     ui.setStatus('Stopped.');
     ui.refreshControls();
+    ui.setPillRunning(false);
   }
 
   // ---------- UI ----------
@@ -866,6 +869,18 @@
       background:var(--field-bg);color:var(--fg);border:1px solid var(--field-border);
       border-radius:3px;padding:3px 5px}
     #lks-settings label{font-size:11px;color:var(--muted);display:block;margin-top:4px}
+    #lks-pill{position:fixed;right:12px;top:80px;z-index:999999;display:none;
+      padding:6px 12px;border-radius:999px;font:12px system-ui;cursor:pointer;
+      background:#0a66c2;color:#fff;border:1px solid #084d92;
+      box-shadow:0 4px 16px rgba(0,0,0,.18);user-select:none}
+    #lks-pill:hover{background:#084d92}
+    #lks-pill.running{box-shadow:0 0 0 0 rgba(10,102,194,.6);animation:lks-pulse 1.6s infinite}
+    @keyframes lks-pulse{
+      0%{box-shadow:0 0 0 0 rgba(10,102,194,.6)}
+      70%{box-shadow:0 0 0 10px rgba(10,102,194,0)}
+      100%{box-shadow:0 0 0 0 rgba(10,102,194,0)}
+    }
+    #lks-pill .pill-hits{font-weight:700;margin-left:4px}
   `;
   const styleEl = document.createElement('style');
   styleEl.textContent = STYLE;
@@ -879,7 +894,7 @@
       <header>
         <div class="hdr-row">
           <span><span id="lks-title" style="cursor:help;text-decoration:underline dotted">Linkshit</span><span id="lks-profile-wrap" style="display:none"> · Profile: <select id="lks-profile" title="Active profile"></select></span></span>
-          <button id="lks-cog" title="Settings">⚙</button>
+          <span><button id="lks-min" title="Minimize panel — click the pill to restore">_</button><button id="lks-cog" title="Settings">⚙</button></span>
         </div>
         <div class="hdr-row">
           <span class="btn-group">
@@ -944,6 +959,33 @@
       </div>`;
     document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
+
+    // ---------- Minimize: collapses the whole panel into a small floating
+    // pill so the LinkedIn page is unobstructed. Pill keeps showing the
+    // session hits count and pulses while scrolling is active so users
+    // know scoring is still running. Click the pill to restore. State
+    // persists across page reloads.
+    const MIN_KEY = NS + 'panel.minimized';
+    const pill = document.createElement('div');
+    pill.id = 'lks-pill';
+    pill.title = 'Linkshit — click to restore the panel';
+    pill.innerHTML = `Linkshit<span class="pill-hits">0</span>`;
+    document.body.append(pill);
+    const pillHitsEl = pill.querySelector('.pill-hits');
+    function setMinimized(on) {
+      if (on) {
+        panel.style.display = 'none';
+        pill.style.display = 'inline-block';
+        try { localStorage.setItem(MIN_KEY, '1'); } catch { /* quota / private mode */ }
+      } else {
+        panel.style.display = '';
+        pill.style.display = 'none';
+        try { localStorage.removeItem(MIN_KEY); } catch { /* ignore */ }
+      }
+    }
+    function setPillRunning(on) {
+      pill.classList.toggle('running', !!on);
+    }
 
     // ---------- Geometry: drag-to-move + resize-from-left, persisted ----------
     const GEOM_KEY = NS + 'panel.geometry';
@@ -1195,6 +1237,15 @@
     // Settings opens as a full-panel overlay: hide body + history while
     // it's up so the form fields aren't crammed below the result list.
     // Close (Save / Cancel) restores whichever body was active.
+    $('lks-min').onclick = () => setMinimized(true);
+    pill.onclick = () => setMinimized(false);
+    // Apply persisted minimized state on boot. Must run after the panel
+    // is in the DOM and the pill exists, hence here rather than in the
+    // module-level boot block.
+    try {
+      if (localStorage.getItem(MIN_KEY) === '1') setMinimized(true);
+    } catch { /* ignore */ }
+
     $('lks-cog').onclick = () => {
       const s = $('lks-settings');
       const opening = s.style.display === 'none' || !s.style.display;
@@ -1352,6 +1403,7 @@
       rendered.clear();
       counters.hits = 0;
       $('lks-c-hits').textContent = '0';
+      pillHitsEl.textContent = '0';
     }
     // Used by rehydrateLivePanel — wipes body + rendered Set without
     // touching counters so a settings re-render mid-session doesn't
@@ -1369,6 +1421,7 @@
       counters[name] = (counters[name] || 0) + n;
       const el = $('lks-c-' + name);
       if (el) el.textContent = counters[name];
+      if (name === 'hits') pillHitsEl.textContent = String(counters.hits);
       if (name === 'hits' || name === 'scored') hideHint();
     }
     // queued is live state, not a session total. Callers pass the current
@@ -1443,8 +1496,9 @@
           if (el) el.textContent = String(c[k]);
         }
       }
+      pillHitsEl.textContent = String(counters.hits);
     }
-    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly, getCounters, setCounters };
+    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly, getCounters, setCounters, setPillRunning };
   })();
 
   // ---------- Live-panel rehydration ----------
