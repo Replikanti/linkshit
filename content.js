@@ -300,13 +300,18 @@
   }
 
   // ---------- Pre-filter ----------
+  // Returns { ok, reason }. The reason is what the panel surfaces in the
+  // `filtered` tooltip so the user can tell at a glance which check
+  // they're tripping — opaque "filtered=N, queued=0" was leaving people
+  // unable to diagnose why nothing reached the LLM.
   function preFilter(p) {
-    if (!p.text || p.text.length < 30) return false;
-    if (p.reactions < CFG.minReactions) return false;
+    if (!p.text || p.text.length < 30) return { ok: false, reason: 'shortText' };
+    if (p.reactions < CFG.minReactions) return { ok: false, reason: 'lowReactions' };
+    if (CFG.authors.length && CFG.authors.some(a => p.author.toLowerCase().includes(a.toLowerCase()))) return { ok: true };
     const hay = (p.author + ' ' + p.text).toLowerCase();
-    if (CFG.authors.length && CFG.authors.some(a => p.author.toLowerCase().includes(a.toLowerCase()))) return true;
-    if (CFG.keywords.length && CFG.keywords.some(k => hay.includes(k.toLowerCase()))) return true;
-    return CFG.keywords.length === 0 && CFG.authors.length === 0;
+    if (CFG.keywords.length && CFG.keywords.some(k => hay.includes(k.toLowerCase()))) return { ok: true };
+    if (CFG.keywords.length === 0 && CFG.authors.length === 0) return { ok: true };
+    return { ok: false, reason: 'noMatch' };
   }
 
   // ---------- Orphan-content-script detection ----------
@@ -543,7 +548,8 @@
         return;
       }
       ui.bump('captured', 1);
-      if (preFilter(post)) {
+      const pf = preFilter(post);
+      if (pf.ok) {
         post.status = 'queued';
         await dbPut(post);
         queue.push(post);
@@ -557,6 +563,7 @@
         // scoring is broken, when actually their keyword list is too
         // narrow for the kind of posts in their feed.
         ui.bump('filtered', 1);
+        ui.bumpFilterReason(pf.reason);
         await dbPut(post);
       }
     } catch (e) {
@@ -1435,6 +1442,29 @@
       $('lks-pause').disabled = !scrollTimer;
     }
     refreshControls();
+    // Per-cause breakdown of pre-filter rejections. Shown in the
+    // `filtered` counter's tooltip so the user can tell at a glance
+    // whether their keyword list, min-reactions, or post-length check
+    // is the one swallowing every captured post.
+    const filterReasons = { lowReactions: 0, noMatch: 0, shortText: 0 };
+    const filteredEl = $('lks-c-filtered')?.parentElement;
+    const FILTERED_BASE_TIP = filteredEl?.title || '';
+    function refreshFilteredTooltip() {
+      if (!filteredEl) return;
+      const r = filterReasons;
+      filteredEl.title = FILTERED_BASE_TIP +
+        `\n\nBreakdown:` +
+        `\n  no keyword/author match: ${r.noMatch}` +
+        `\n  too few reactions (LinkedIn 2026-05 DOM no longer exposes the reaction count, so any min-reactions > 0 rejects everything): ${r.lowReactions}` +
+        `\n  text too short: ${r.shortText}`;
+    }
+    refreshFilteredTooltip();
+    function bumpFilterReason(reason) {
+      if (reason in filterReasons) {
+        filterReasons[reason] += 1;
+        refreshFilteredTooltip();
+      }
+    }
     function bump(name, n) {
       counters[name] = (counters[name] || 0) + n;
       const el = $('lks-c-' + name);
@@ -1516,7 +1546,7 @@
       }
       pillHitsEl.textContent = String(counters.hits);
     }
-    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly, getCounters, setCounters, setPillRunning };
+    return { setStatus, bump, bumpFilterReason, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly, getCounters, setCounters, setPillRunning };
   })();
 
   // ---------- Live-panel rehydration ----------
