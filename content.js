@@ -550,6 +550,13 @@
         ui.setQueued(queue.length);
         maybeFlush();
       } else {
+        // Post passed all "structural" skips (promoted/company/old/dedup)
+        // but didn't match the user's keyword/author/reactions pre-filter.
+        // Surface this explicitly: without a counter the user just sees
+        // captured climbing while queued/scored stay at zero and assumes
+        // scoring is broken, when actually their keyword list is too
+        // narrow for the kind of posts in their feed.
+        ui.bump('filtered', 1);
         await dbPut(post);
       }
     } catch (e) {
@@ -920,6 +927,7 @@
         <span title="Posts skipped because they were sponsored / Promoted.">promoted <b id="lks-c-promoted">0</b></span>
         <span title="Posts skipped because they were authored by a company page (toggle in Settings).">company <b id="lks-c-company">0</b></span>
         <span title="Posts skipped by the age filter (when enabled).">old <b id="lks-c-tooOld">0</b></span>
+        <span title="Posts that survived the basic skips (not promoted, not company, not too old, not already in DB) but failed your pre-filter — the keyword list / author allowlist / min-reactions in Settings. If this is high while queued+scored stay 0, your keyword list probably doesn't match the kind of posts in your feed: clear the keyword field to send everything to the LLM.">filtered <b id="lks-c-filtered">0</b></span>
         <span title="Posts in the queue waiting to be scored. Live count — drops as scoring drains it.">queued <b id="lks-c-queued">0</b></span>
         <span title="Posts the LLM has assigned a score to in this session.">scored <b id="lks-c-scored">0</b></span>
         <span title="Scored posts that crossed the score threshold and got rendered.">hits <b id="lks-c-hits">0</b></span>
@@ -1060,7 +1068,7 @@
         panel.style.width = newWidth + 'px';
       });
     });
-    const counters = { captured: 0, promoted: 0, company: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
+    const counters = { captured: 0, promoted: 0, company: 0, tooOld: 0, filtered: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
     // scroll-into-view of the same post don't produce duplicate rows.
     const rendered = new Set();
