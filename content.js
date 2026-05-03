@@ -44,8 +44,8 @@
     scoreThresh: 7,
     showBorderline: false,
     borderlineDelta: 2,
-    scrollMinMs: 3000,
-    scrollMaxMs: 6000,
+    scrollMinMs: 5000,
+    scrollMaxMs: 10000,
     batchSize: 8,
     maxPosts: 50,
     autoReloadOnCap: true,
@@ -300,8 +300,33 @@
     return CFG.keywords.length === 0 && CFG.authors.length === 0;
   }
 
+  // ---------- Orphan-content-script detection ----------
+  // After the user reloads the extension via chrome://extensions, every
+  // already-open LinkedIn tab keeps running its old content script. The
+  // chrome.runtime context is invalidated; any chrome.* call throws
+  // "Extension context invalidated", which Chrome itself reports as a
+  // runtime error on the extensions page regardless of how we wrap it.
+  // We can't undo Chrome's reporting, but we can stop generating new
+  // ones — short-circuit anything that touches chrome.* in this script
+  // once the context is gone, and surface a hint that the tab needs F5.
+  function isAlive() {
+    try { return !!chrome?.runtime?.id; } catch { return false; }
+  }
+  let invalidatedAnnounced = false;
+  function announceInvalidated() {
+    if (invalidatedAnnounced) return;
+    invalidatedAnnounced = true;
+    try { ui.setStatus('Extension reloaded — refresh tab (F5) to continue.'); } catch { /* panel might be gone */ }
+  }
+
   // ---------- Score via background service worker → native messaging host ----------
   async function scoreBatch(posts) {
+    if (!isAlive()) {
+      announceInvalidated();
+      const err = new Error('Extension context invalidated');
+      err.code = 'context_invalidated';
+      throw err;
+    }
     const response = await chrome.runtime.sendMessage({
       type: 'score',
       criteria: CFG.criteria,
@@ -345,6 +370,7 @@
   const MAX_CONSECUTIVE_ERRORS = 3;
   async function maybeFlush(force = false) {
     if (quotaPaused || scoringStalled) return;
+    if (!isAlive()) { announceInvalidated(); return; }
     if (force) pendingForce = true;
     if (scoring || queue.length === 0) return;
     if (queue.length < CFG.batchSize && !pendingForce) return;
@@ -575,7 +601,17 @@
     // (every visible text-box is marked, the for loop is a no-op);
     // newly-mounted nodes are processed exactly once. Hidden-tab guard
     // matches the auto-scroll tick so we don't burn CPU in background.
-    setInterval(() => {
+    const pollHandle = setInterval(() => {
+      if (!isAlive()) {
+        // Orphaned content script after extension reload. Stop polling
+        // entirely — without this we'd keep firing rescan + tryCapture +
+        // dbGet (still works, IDB is page-local) and eventually hit
+        // chrome.runtime via maybeFlush, generating Chrome-reported
+        // errors on the extensions page.
+        clearInterval(pollHandle);
+        announceInvalidated();
+        return;
+      }
       if (document.visibilityState === 'hidden') return;
       rescan();
     }, 2000);
@@ -629,6 +665,25 @@
       // affects the off-screen accumulation.
       for (const v of document.querySelectorAll('video')) {
         if (!v.paused) { try { v.pause(); } catch { /* not all videos accept programmatic pause */ } }
+      }
+      // Throttle off-screen images. There's no API to "pause" a still
+      // image, but we can give the browser explicit hints to skip
+      // decoding, paint and composite work on images that are far above
+      // the current viewport. content-visibility:auto + decoding:async
+      // lets Chrome lazily decode and skip layout for content the user
+      // can't see, which is the bulk of the feed once the user has
+      // scrolled a few screens. We only stamp once per element via the
+      // __lksPicHinted flag so this is essentially free per tick.
+      for (const im of document.querySelectorAll('img')) {
+        if (im.__lksPicHinted) continue;
+        im.__lksPicHinted = true;
+        if (!im.decoding) im.decoding = 'async';
+        if (!im.loading) im.loading = 'lazy';
+        // content-visibility on the image's wrapping <picture> or parent
+        // span gives the biggest wins; on the <img> itself it has no
+        // effect, so apply to the closest block-ish container.
+        const block = im.closest('picture, span, div');
+        if (block && !block.style.contentVisibility) block.style.contentVisibility = 'auto';
       }
       document.querySelectorAll('button').forEach(b => {
         const t = (b.innerText || '').toLowerCase();
