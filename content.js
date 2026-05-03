@@ -1459,10 +1459,31 @@
         `\n  text too short: ${r.shortText}`;
     }
     refreshFilteredTooltip();
+    // Latch a warning once — we want to flag the broken pipeline but not
+    // overwrite every fresh status message after the user has seen it.
+    let prefilterWarned = false;
     function bumpFilterReason(reason) {
       if (reason in filterReasons) {
         filterReasons[reason] += 1;
         refreshFilteredTooltip();
+        // Auto-diagnose: filtered climbing while queued+scored stay 0
+        // means the pre-filter is gating the entire pipeline. Surface
+        // it directly in the status line so the user doesn't have to
+        // read the breakdown tooltip to notice.
+        if (!prefilterWarned
+            && counters.filtered >= 20
+            && counters.queued === 0
+            && counters.scored === 0) {
+          prefilterWarned = true;
+          const top = Object.entries(filterReasons).sort((a, b) => b[1] - a[1])[0];
+          const cause = top && top[1] > 0 ? top[0] : 'noMatch';
+          const fix = cause === 'lowReactions'
+            ? 'Set Min reactions to 0 in ⚙ — LinkedIn 2026-05 DOM no longer exposes reaction counts.'
+            : cause === 'shortText'
+              ? 'Posts have very short text; adjust your feed or wait for longer posts.'
+              : 'Clear the Pre-filter keywords field in ⚙ — your keywords don\'t match this feed.';
+          setStatus(`⚠ Pre-filter is rejecting everything (${cause}). ${fix}`);
+        }
       }
     }
     function bump(name, n) {
@@ -1579,6 +1600,23 @@
 
   // ---------- Boot ----------
   (async () => {
+    // One-shot dump of the active config when the script loads. Users
+    // diagnosing "nothing reaches the LLM" can open DevTools → Console
+    // and immediately see what keywords / minReactions / scoreThresh
+    // the system actually has — instead of guessing whether their
+    // saved settings drifted from the defaults shown in the UI.
+    console.info('[linkshit] boot config:', {
+      version: '0.3.35',
+      criteria: (CFG.criteria || '').slice(0, 120),
+      keywords: CFG.keywords,
+      authors: CFG.authors,
+      minReactions: CFG.minReactions,
+      maxAgeHours: CFG.maxAgeHours,
+      scoreThresh: CFG.scoreThresh,
+      skipCompanyPosts: CFG.skipCompanyPosts,
+      batchSize: CFG.batchSize,
+      maxPosts: CFG.maxPosts,
+    });
     // Drain any queued-but-not-scored posts left over from a previous session
     // BEFORE starting the observer, so the observer can't race on the same
     // URN. seen.add prevents a later DOM re-encounter from re-queueing.
