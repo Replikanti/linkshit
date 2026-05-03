@@ -49,6 +49,7 @@
     batchSize: 4,
     maxPosts: 50,
     autoReloadOnCap: true,
+    skipCompanyPosts: true,
   };
   const CFG = {};
   for (const k of Object.keys(DEFAULTS)) {
@@ -504,6 +505,15 @@
         ui.bump('promoted', 1);
         return;
       }
+      if (CFG.skipCompanyPosts && post.authorKind === 'company') {
+        // Company-page posts almost never satisfy the criteria language
+        // around personal experience or first-person narrative — and
+        // wasting an LLM call on them just for a low score is silly.
+        // Drop them at the pre-filter, count separately so the user can
+        // see the volume.
+        ui.bump('company', 1);
+        return;
+      }
       if (CFG.maxAgeHours > 0) {
         const age = extractAgeHours(el);
         if (age != null && age > CFG.maxAgeHours) {
@@ -858,12 +868,15 @@
           <button id="lks-pause">Pause</button>
           <button id="lks-stop">Stop</button>
           <button id="lks-history-toggle">History</button>
+          <button id="lks-export-btn" title="Download all stored hits as JSON.">Export</button>
+          <button id="lks-clear-btn" title="Empty the visible panel. History view still has everything in IDB.">Clear</button>
           <button id="lks-cog">⚙</button>
         </span>
       </header>
       <div class="counters">
         <span title="Posts encountered this session (after dedup).">captured <b id="lks-c-captured">0</b></span>
         <span title="Posts skipped because they were sponsored / Promoted.">promoted <b id="lks-c-promoted">0</b></span>
+        <span title="Posts skipped because they were authored by a company page (toggle in Settings).">company <b id="lks-c-company">0</b></span>
         <span title="Posts skipped by the age filter (when enabled).">old <b id="lks-c-tooOld">0</b></span>
         <span title="Posts in the queue waiting to be scored. Live count — drops as scoring drains it.">queued <b id="lks-c-queued">0</b></span>
         <span title="Posts the LLM has assigned a score to in this session.">scored <b id="lks-c-scored">0</b></span>
@@ -896,6 +909,7 @@
         <label>Max age (hours, 0 = unlimited)</label><input id="s-maxAgeHours" type="number"/>
         <label>Score threshold to surface</label><input id="s-scoreThresh" type="number"/>
         <label><input id="s-showBorderline" type="checkbox" style="width:auto;margin-right:6px"/>Show borderline (within N below threshold)</label>
+        <label><input id="s-skipCompanyPosts" type="checkbox" style="width:auto;margin-right:6px"/>Skip posts from company pages</label>
         <label>Borderline N</label><input id="s-borderlineDelta" type="number"/>
         <label>Scroll delay min / max ms</label>
         <input id="s-scrollMinMs" type="number"/><input id="s-scrollMaxMs" type="number"/>
@@ -975,7 +989,7 @@
         panel.style.width = newWidth + 'px';
       });
     });
-    const counters = { captured: 0, promoted: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
+    const counters = { captured: 0, promoted: 0, company: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
     // scroll-into-view of the same post don't produce duplicate rows.
     const rendered = new Set();
@@ -1015,6 +1029,7 @@
       $('s-maxAgeHours').value = CFG.maxAgeHours;
       $('s-scoreThresh').value = CFG.scoreThresh;
       $('s-showBorderline').checked = CFG.showBorderline;
+      $('s-skipCompanyPosts').checked = CFG.skipCompanyPosts;
       $('s-borderlineDelta').value = CFG.borderlineDelta;
       $('s-scrollMinMs').value = CFG.scrollMinMs;
       $('s-scrollMaxMs').value = CFG.scrollMaxMs;
@@ -1166,6 +1181,7 @@
       SAVE('maxAgeHours', Number.parseInt($('s-maxAgeHours').value, 10) || 0);
       SAVE('scoreThresh', Number.parseInt($('s-scoreThresh').value, 10) || 7);
       SAVE('showBorderline', $('s-showBorderline').checked);
+      SAVE('skipCompanyPosts', $('s-skipCompanyPosts').checked);
       SAVE('borderlineDelta', Number.parseInt($('s-borderlineDelta').value, 10) || 2);
       SAVE('scrollMinMs', Number.parseInt($('s-scrollMinMs').value, 10) || 3000);
       SAVE('scrollMaxMs', Number.parseInt($('s-scrollMaxMs').value, 10) || 6000);
@@ -1174,7 +1190,11 @@
       $('lks-settings').style.display = 'none';
       $('lks-body').style.display = historyMode ? 'none' : '';
       $('lks-history').style.display = historyMode ? '' : 'none';
-      setStatus('Settings saved.');
+      // Re-apply the threshold / borderline filters to the live panel:
+      // the settings change otherwise leaves stale cards (e.g. borderline
+      // cards visible after the user turns Show borderline off, or 5-6
+      // score cards still showing after raising threshold to 7).
+      rehydrateLivePanel().then(() => setStatus('Settings saved.'));
     };
     $('s-cancel').onclick = () => {
       sync();
@@ -1184,7 +1204,10 @@
       setStatus('Settings unchanged.');
     };
     $('s-rescore').onclick = () => rescoreAll();
-    $('s-export').onclick = async () => {
+    // Export and Clear-panel are also exposed in the header (lks-export-btn,
+    // lks-clear-btn) — the Settings entries are kept as a fallback for
+    // muscle-memory but the header is the primary discovery point.
+    const exportAll = async () => {
       const all = await dbAllScored(0);
       const payload = {
         exported_at: new Date().toISOString(),
@@ -1212,12 +1235,18 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setStatus(`Exported ${all.length} posts.`);
     };
-    $('s-clear-panel').onclick = () => {
+    const clearPanel = () => {
       $('lks-body').innerHTML = '';
       rendered.clear();
       counters.hits = 0;
       $('lks-c-hits').textContent = '0';
       setStatus('Panel cleared (IDB intact — see History).');
+    };
+    $('s-export').onclick = exportAll;
+    $('lks-export-btn').onclick = exportAll;
+    $('lks-clear-btn').onclick = clearPanel;
+    $('s-clear-panel').onclick = () => {
+      clearPanel();
     };
     $('s-clear').onclick = async () => {
       if (!confirm('Wipe all stored posts and scores?')) return;
@@ -1257,6 +1286,13 @@
       rendered.clear();
       counters.hits = 0;
       $('lks-c-hits').textContent = '0';
+    }
+    // Used by rehydrateLivePanel — wipes body + rendered Set without
+    // touching counters so a settings re-render mid-session doesn't
+    // also zero out hits.
+    function clearBodyOnly() {
+      $('lks-body').innerHTML = '';
+      rendered.clear();
     }
     function refreshControls() {
       $('lks-start').textContent = paused ? 'Resume' : 'Start';
@@ -1325,8 +1361,27 @@
         last.remove();
       }
     }
-    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults };
+    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly };
   })();
+
+  // ---------- Live-panel rehydration ----------
+  // Used by boot AND by the Settings Save handler. Wipes the live panel
+  // and re-renders the top stored hits according to the CURRENT
+  // CFG.scoreThresh / CFG.showBorderline / CFG.borderlineDelta.
+  // Pre-empts the stale-card problem after the user lowers the
+  // threshold or toggles borderline off and expects the panel to
+  // reflect the new filter immediately. Counter row is NOT bumped
+  // (silent=true) — rehydration is purely visual.
+  async function rehydrateLivePanel() {
+    ui.clearBodyOnly();
+    const lowerBound = CFG.showBorderline
+      ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
+      : CFG.scoreThresh;
+    const past = await dbAllScored(lowerBound);
+    for (const p of past.filter(x => x.status !== 'dismissed').slice(0, 50)) {
+      ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true }, true);
+    }
+  }
 
   // ---------- Boot ----------
   (async () => {
@@ -1340,19 +1395,7 @@
     }
     ui.setQueued(queue.length);
     startObserver();
-    const lowerBound = CFG.showBorderline
-      ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
-      : CFG.scoreThresh;
-    const past = await dbAllScored(lowerBound);
-    for (const p of past.filter(x => x.status !== 'dismissed').slice(0, 50)) {
-      // Render past hits visually but DO NOT bump session counters.
-      // The counter row reflects this-session activity; the user found
-      // \"scored 52, hits 51\" right after a fresh F5 confusing because
-      // they hadn't done anything yet. Live encounters via tryCapture
-      // still bump scored/hits, so the invariant holds within the
-      // session — the boot rendering is purely visual rehydration.
-      ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true }, true);
-    }
+    await rehydrateLivePanel();
     const anyStored = await dbAllScored(0);
     if (anyStored.length === 0) ui.showHint();
     // Auto-resume after a DOM-recycle reload. The previous session segment
