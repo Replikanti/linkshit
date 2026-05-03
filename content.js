@@ -817,7 +817,11 @@
     #lks-panel .result .author{font-weight:600}
     #lks-panel .result .score{float:right;background:var(--primary);color:var(--primary-fg);padding:1px 6px;
       border-radius:3px;font-size:11px}
-    #lks-panel .result .reason{font-style:italic;color:var(--reason);margin:2px 0}
+    #lks-panel .result .reason{color:var(--fg);margin:6px 0;padding:5px 8px;
+      background:var(--btn-bg);border-left:3px solid var(--primary);border-radius:0 3px 3px 0;
+      font-size:12px;line-height:1.45}
+    #lks-panel .result .reason::before{content:"Why this score: ";font-weight:600;color:var(--primary)}
+    #lks-panel .result .reason:empty{display:none}
     #lks-panel .result .snippet{color:var(--snippet);font-size:12px;max-height:64px;overflow:hidden}
     #lks-panel .result a{color:var(--primary);text-decoration:none;font-size:11px}
     #lks-panel .result .dismiss{float:right;margin-left:6px;background:transparent;border:none;color:var(--muted);
@@ -840,7 +844,7 @@
     panel.innerHTML = `
       <div id="lks-resize"></div>
       <header>
-        <span>Linkshit<span id="lks-profile-wrap" style="display:none"> · Profile: <select id="lks-profile" title="Active profile"></select></span></span>
+        <span><span id="lks-title" style="cursor:help;text-decoration:underline dotted">Linkshit</span><span id="lks-profile-wrap" style="display:none"> · Profile: <select id="lks-profile" title="Active profile"></select></span></span>
         <span>
           <button id="lks-start" class="primary">Start</button>
           <button id="lks-pause">Pause</button>
@@ -978,6 +982,15 @@
         if (p.name === profiles.activeName) opt.selected = true;
         sel.append(opt);
       }
+      // Surface the active criteria as the dropdown's tooltip so users
+      // can see what the LLM is judging posts against without having to
+      // open Settings. They reach for this when a Score: N/10 doesn't
+      // make sense to them.
+      sel.title = `Active criteria:\n\n${CFG.criteria || '(none)'}`;
+      // Same tooltip on the panel title — visible even when there's
+      // only one profile and the dropdown is hidden.
+      const titleEl = $('lks-title');
+      if (titleEl) titleEl.title = `Active criteria (LLM judges every post against this):\n\n${CFG.criteria || '(none)'}`;
       // Hide the whole "· Profile: [select]" affordance when a single profile
       // exists — at that point the dropdown is just a confusing title-suffix
       // with one inert option. It pops back the moment the user creates a
@@ -1016,11 +1029,15 @@
       row.dataset.score = p.score;
       if (p.status === 'dismissed') row.classList.add('dismissed');
       row.innerHTML = `
-        <div><span class="score" title="LLM-assigned relevance score 0–10 against your active criteria."></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
+        <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
-      row.querySelector('.score').textContent = `Score: ${p.score}/10`;
+      const scoreEl = row.querySelector('.score');
+      scoreEl.textContent = `Score: ${p.score}/10`;
+      scoreEl.title = p.reason
+        ? `LLM scored ${p.score}/10 because: ${p.reason}`
+        : `LLM scored ${p.score}/10 against your active criteria.`;
       row.querySelector('.author').textContent = p.author;
       row.querySelector('.reason').textContent = p.reason || '';
       row.querySelector('.snippet').textContent = (p.text || '').slice(0, 240);
@@ -1275,11 +1292,15 @@
       div.dataset.score = post.score;
       div.className = post.borderline ? 'result borderline' : 'result';
       div.innerHTML = `
-        <div><span class="score" title="LLM-assigned relevance score 0–10 against your active criteria."></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
+        <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
-      div.querySelector('.score').textContent = `Score: ${post.score}/10`;
+      const scoreEl = div.querySelector('.score');
+      scoreEl.textContent = `Score: ${post.score}/10`;
+      scoreEl.title = post.reason
+        ? `LLM scored ${post.score}/10 because: ${post.reason}`
+        : `LLM scored ${post.score}/10 against your active criteria.`;
       div.querySelector('.author').textContent = post.author;
       div.querySelector('.reason').textContent = post.reason;
       div.querySelector('.snippet').textContent = post.text.slice(0, 240);
