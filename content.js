@@ -41,7 +41,7 @@
     authors: [],
     minReactions: 0,
     maxAgeHours: 0,
-    scoreThresh: 7,
+    scoreThresh: 5,
     showBorderline: false,
     borderlineDelta: 2,
     scrollMinMs: 5000,
@@ -381,6 +381,7 @@
     if (document.visibilityState === 'hidden') return;
     scoring = true;
     const batch = queue.splice(0, CFG.batchSize);
+    ui.setQueued(queue.length);
     ui.setStatus(`Scoring ${batch.length} (${queue.length} queued)…`);
     try {
       const scored = await scoreBatch(batch);
@@ -404,6 +405,7 @@
       // visible in DevTools for genuine debugging.
       console.warn('[Linkshit]', e);
       for (const p of batch) queue.unshift(p);
+      ui.setQueued(queue.length);
       if (e.code === 'quota_exhausted') {
         quotaPaused = true;
         pauseScroll();
@@ -522,7 +524,7 @@
         post.status = 'queued';
         await dbPut(post);
         queue.push(post);
-        ui.bump('queued', 1);
+        ui.setQueued(queue.length);
         maybeFlush();
       } else {
         await dbPut(post);
@@ -838,12 +840,12 @@
         </span>
       </header>
       <div class="counters">
-        <span>captured <b id="lks-c-captured">0</b></span>
-        <span>promoted <b id="lks-c-promoted">0</b></span>
-        <span>old <b id="lks-c-tooOld">0</b></span>
-        <span>queued <b id="lks-c-queued">0</b></span>
-        <span>scored <b id="lks-c-scored">0</b></span>
-        <span>hits <b id="lks-c-hits">0</b></span>
+        <span title="Posts encountered this session (after dedup).">captured <b id="lks-c-captured">0</b></span>
+        <span title="Posts skipped because they were sponsored / Promoted.">promoted <b id="lks-c-promoted">0</b></span>
+        <span title="Posts skipped by the age filter (when enabled).">old <b id="lks-c-tooOld">0</b></span>
+        <span title="Posts in the queue waiting to be scored. Live count — drops as scoring drains it.">queued <b id="lks-c-queued">0</b></span>
+        <span title="Posts the LLM has assigned a score to in this session.">scored <b id="lks-c-scored">0</b></span>
+        <span title="Scored posts that crossed the score threshold and got rendered.">hits <b id="lks-c-hits">0</b></span>
       </div>
       <div class="status" id="lks-status">Idle.</div>
       <div class="hint" id="lks-hint" style="display:none">
@@ -998,12 +1000,13 @@
     function renderHistoryRow(p) {
       const row = document.createElement('div');
       row.className = 'result';
+      row.dataset.score = p.score;
       row.innerHTML = `
         <div><span class="score"></span><span class="author"></span></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
-      row.querySelector('.score').textContent = p.score;
+      row.querySelector('.score').textContent = `Score: ${p.score}/10`;
       row.querySelector('.author').textContent = p.author;
       row.querySelector('.reason').textContent = p.reason || '';
       row.querySelector('.snippet').textContent = (p.text || '').slice(0, 240);
@@ -1162,6 +1165,15 @@
       if (el) el.textContent = counters[name];
       if (name === 'hits' || name === 'scored') hideHint();
     }
+    // queued is live state, not a session total. Callers pass the current
+    // queue.length whenever it changes (push, splice, unshift, boot drain)
+    // so the panel reads as the actual depth, not how many were ever queued
+    // since boot. Closes the math-confusion that #80 surfaced.
+    function setQueued(n) {
+      counters.queued = n;
+      const el = $('lks-c-queued');
+      if (el) el.textContent = n;
+    }
     // Cap visible result cards to bound panel DOM growth in long sessions.
     // History view (dbAllScored) still surfaces everything stored. Insert
     // order is score-descending; eviction drops the lowest-score card from
@@ -1175,20 +1187,21 @@
       if (!post.borderline) bump('hits', 1);
       const div = document.createElement('div');
       div.dataset.urn = post.urn;
+      div.dataset.score = post.score;
       div.className = post.borderline ? 'result borderline' : 'result';
       div.innerHTML = `
         <div><span class="score"></span><span class="author"></span></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
-      div.querySelector('.score').textContent = post.score;
+      div.querySelector('.score').textContent = `Score: ${post.score}/10`;
       div.querySelector('.author').textContent = post.author;
       div.querySelector('.reason').textContent = post.reason;
       div.querySelector('.snippet').textContent = post.text.slice(0, 240);
       div.querySelector('a').href = post.url;
       const body = $('lks-body');
       const after = [...body.children].find(
-        c => Number.parseInt(c.querySelector('.score').textContent, 10) < post.score
+        c => Number.parseInt(c.dataset.score || '0', 10) < post.score
       );
       if (after) after.before(div); else body.append(div);
       while (body.children.length > MAX_PANEL_RESULTS) {
@@ -1197,7 +1210,7 @@
         last.remove();
       }
     }
-    return { setStatus, bump, addResult, showHint, hideHint, refreshControls, clearResults };
+    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults };
   })();
 
   // ---------- Boot ----------
@@ -1209,8 +1222,8 @@
     for (const p of queuedFromDisk) {
       seen.add(p.urn);
       queue.push(p);
-      ui.bump('queued', 1);
     }
+    ui.setQueued(queue.length);
     startObserver();
     const lowerBound = CFG.showBorderline
       ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
