@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linkshit",
-  "version": "0.3.25",
+  "version": "0.3.26",
   "description": "Linkshit — auto-scroll your LinkedIn feed and surface posts matching your criteria via a local LLM.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEApyY5xhnWfT/r3UK34waLo+1jAMr7qetraziKoLZsX6ie3l55aQbSxESupuUh1wGsQ4qrF+BayGs6yLfF7LFYdhFw8I9CJfWHaRXo0MntyFwmhWl073mUz8nB45xsTJP2bOzrTITcLM6MCSrb4mzw7XfCU5m3nhhbddrWFMWnrxrUOJLkd6PWVKX3A2xaJUjKgBPGiF0o5LT+hZHrUaeR//+u3Jvh048/wZE8GacdhMHtHCP5n/lUD3RY74L7lnFeRT/V+yNW8uvyOyXctw10HH3Ub02aVIudPRcD4RcGcL/3k84P6WOyMb9yIlmckYQnBNaPjURAeRTlF8Q70P/ZPQIDAQAB",
   "permissions": ["nativeMessaging"],
