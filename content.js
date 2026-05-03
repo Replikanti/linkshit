@@ -49,6 +49,7 @@
     batchSize: 4,
     maxPosts: 50,
     autoReloadOnCap: true,
+    skipCompanyPosts: true,
   };
   const CFG = {};
   for (const k of Object.keys(DEFAULTS)) {
@@ -504,6 +505,15 @@
         ui.bump('promoted', 1);
         return;
       }
+      if (CFG.skipCompanyPosts && post.authorKind === 'company') {
+        // Company-page posts almost never satisfy the criteria language
+        // around personal experience or first-person narrative — and
+        // wasting an LLM call on them just for a low score is silly.
+        // Drop them at the pre-filter, count separately so the user can
+        // see the volume.
+        ui.bump('company', 1);
+        return;
+      }
       if (CFG.maxAgeHours > 0) {
         const age = extractAgeHours(el);
         if (age != null && age > CFG.maxAgeHours) {
@@ -864,6 +874,7 @@
       <div class="counters">
         <span title="Posts encountered this session (after dedup).">captured <b id="lks-c-captured">0</b></span>
         <span title="Posts skipped because they were sponsored / Promoted.">promoted <b id="lks-c-promoted">0</b></span>
+        <span title="Posts skipped because they were authored by a company page (toggle in Settings).">company <b id="lks-c-company">0</b></span>
         <span title="Posts skipped by the age filter (when enabled).">old <b id="lks-c-tooOld">0</b></span>
         <span title="Posts in the queue waiting to be scored. Live count — drops as scoring drains it.">queued <b id="lks-c-queued">0</b></span>
         <span title="Posts the LLM has assigned a score to in this session.">scored <b id="lks-c-scored">0</b></span>
@@ -896,6 +907,7 @@
         <label>Max age (hours, 0 = unlimited)</label><input id="s-maxAgeHours" type="number"/>
         <label>Score threshold to surface</label><input id="s-scoreThresh" type="number"/>
         <label><input id="s-showBorderline" type="checkbox" style="width:auto;margin-right:6px"/>Show borderline (within N below threshold)</label>
+        <label><input id="s-skipCompanyPosts" type="checkbox" style="width:auto;margin-right:6px"/>Skip posts from company pages</label>
         <label>Borderline N</label><input id="s-borderlineDelta" type="number"/>
         <label>Scroll delay min / max ms</label>
         <input id="s-scrollMinMs" type="number"/><input id="s-scrollMaxMs" type="number"/>
@@ -975,7 +987,7 @@
         panel.style.width = newWidth + 'px';
       });
     });
-    const counters = { captured: 0, promoted: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
+    const counters = { captured: 0, promoted: 0, company: 0, tooOld: 0, queued: 0, scored: 0, hits: 0 };
     // Track URNs already rendered in the panel so the boot replay + later
     // scroll-into-view of the same post don't produce duplicate rows.
     const rendered = new Set();
@@ -1015,6 +1027,7 @@
       $('s-maxAgeHours').value = CFG.maxAgeHours;
       $('s-scoreThresh').value = CFG.scoreThresh;
       $('s-showBorderline').checked = CFG.showBorderline;
+      $('s-skipCompanyPosts').checked = CFG.skipCompanyPosts;
       $('s-borderlineDelta').value = CFG.borderlineDelta;
       $('s-scrollMinMs').value = CFG.scrollMinMs;
       $('s-scrollMaxMs').value = CFG.scrollMaxMs;
@@ -1166,6 +1179,7 @@
       SAVE('maxAgeHours', Number.parseInt($('s-maxAgeHours').value, 10) || 0);
       SAVE('scoreThresh', Number.parseInt($('s-scoreThresh').value, 10) || 7);
       SAVE('showBorderline', $('s-showBorderline').checked);
+      SAVE('skipCompanyPosts', $('s-skipCompanyPosts').checked);
       SAVE('borderlineDelta', Number.parseInt($('s-borderlineDelta').value, 10) || 2);
       SAVE('scrollMinMs', Number.parseInt($('s-scrollMinMs').value, 10) || 3000);
       SAVE('scrollMaxMs', Number.parseInt($('s-scrollMaxMs').value, 10) || 6000);
