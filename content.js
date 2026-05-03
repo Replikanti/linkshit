@@ -355,7 +355,13 @@
       ui.bump('scored', scored.length);
       ui.setStatus(scrollTimer ? 'Scrolling…' : 'Idle.');
     } catch (e) {
-      console.error('[Linkshit]', e);
+      // warn rather than error so transient Chrome MV3 service-worker
+      // lifecycle hiccups (cold-start sendMessage, port disconnected
+      // mid-batch as SW gets killed, etc.) don't badge the extension
+      // red on chrome://extensions. The bounded-retry / quotaPaused
+      // logic already handles real failures cleanly; the message stays
+      // visible in DevTools for genuine debugging.
+      console.warn('[Linkshit]', e);
       for (const p of batch) queue.unshift(p);
       if (e.code === 'quota_exhausted') {
         quotaPaused = true;
