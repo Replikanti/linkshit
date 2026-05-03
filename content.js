@@ -825,6 +825,8 @@
       background:var(--btn-bg);color:var(--fg);
       border-radius:4px;cursor:pointer;font:inherit}
     #lks-panel button.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+    #lks-panel button.danger{background:#c62828;color:#fff;border-color:#b71c1c}
+    #lks-panel button.danger:hover{background:#b71c1c}
     #lks-panel .status{padding:6px 12px;font-size:12px;color:var(--muted);background:var(--status-bg);
       border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
     #lks-panel .counters{padding:6px 12px;font-size:11px;color:var(--muted-2);display:flex;gap:12px;
@@ -938,7 +940,7 @@
         <button id="s-save" class="primary">Save</button>
         <button id="s-cancel">Cancel</button>
         <button id="s-rescore">Rescore stored</button>
-        <button id="s-clear">Clear DB</button>
+        <button id="s-clear" class="danger">Clear DB (irreversible)</button>
       </div>`;
     document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
