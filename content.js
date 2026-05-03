@@ -32,7 +32,7 @@
     scrollMinMs: 3000,
     scrollMaxMs: 6000,
     batchSize: 8,
-    maxPosts: 200,
+    maxPosts: 100,
     autoReloadOnCap: true,
   };
   const CFG = {};
@@ -545,6 +545,19 @@
       }
     };
     rescan();
+    // Polling fallback. The MutationObserver alone does not reliably fire
+    // on this LinkedIn DOM — React reconciliation in some cases produces
+    // mutations the observer never wakes up on, so the capture pipeline
+    // stays silent even as the user is visibly scrolling and new posts
+    // are mounting. Polling rescues the pipeline. Marker-skip in the loop
+    // body means each tick is essentially free if MO already kept up
+    // (every visible text-box is marked, the for loop is a no-op);
+    // newly-mounted nodes are processed exactly once. Hidden-tab guard
+    // matches the auto-scroll tick so we don't burn CPU in background.
+    setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      rescan();
+    }, 2000);
   }
 
   // ---------- Scroller (human-like pacing) ----------
