@@ -839,7 +839,8 @@
     #lks-panel button.danger:hover{background:#b71c1c}
     #lks-panel .status{padding:6px 12px;font-size:12px;color:var(--muted);background:var(--status-bg);
       border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
-    #lks-panel .counters{padding:6px 12px;font-size:11px;color:var(--muted-2);display:flex;gap:12px;
+    #lks-panel .counters{padding:6px 12px;font-size:11px;color:var(--muted-2);display:flex;
+      flex-wrap:wrap;gap:6px 12px;
       border-bottom:1px solid var(--border-subtle)}
     #lks-panel .counters span{cursor:help;text-decoration:underline dotted;text-decoration-color:var(--muted)}
     #lks-panel .hint{padding:10px 12px;font-size:12px;color:var(--hint-fg);background:var(--hint-bg);
