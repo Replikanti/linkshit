@@ -32,7 +32,7 @@
     scrollMinMs: 3000,
     scrollMaxMs: 6000,
     batchSize: 8,
-    maxPosts: 100,
+    maxPosts: 50,
     autoReloadOnCap: true,
   };
   const CFG = {};
@@ -597,6 +597,18 @@
       // or future LinkedIn variants that scroll the document still work.
       const scroller = document.querySelector('main') || document.scrollingElement || document.body;
       scroller.scrollTo(0, scroller.scrollHeight);
+      // Pause every <video> in the feed before processing the rest of
+      // the tick. LinkedIn auto-plays inline videos as they scroll into
+      // view; left to its own devices, every post in a long auto-scroll
+      // session ends up with a continuously playing video on the main
+      // thread. Each running video adds CPU + GPU + decoder memory
+      // pressure, compounding with the React reconciliation cost as the
+      // feed DOM grows. LinkedIn re-starts a video when it next comes
+      // back into view (IntersectionObserver-driven), so this only
+      // affects the off-screen accumulation.
+      for (const v of document.querySelectorAll('video')) {
+        if (!v.paused) { try { v.pause(); } catch { /* not all videos accept programmatic pause */ } }
+      }
       document.querySelectorAll('button').forEach(b => {
         const t = (b.innerText || '').toLowerCase();
         if (t.includes('load more comment') || t.includes('show more replies')
