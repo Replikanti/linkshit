@@ -869,6 +869,11 @@
       background:var(--field-bg);color:var(--fg);border:1px solid var(--field-border);
       border-radius:3px;padding:3px 5px}
     #lks-settings label{font-size:11px;color:var(--muted);display:block;margin-top:4px}
+    #lks-settings .actions-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+    #lks-settings .actions-row button{margin-left:0}
+    #lks-settings .danger-row{margin-top:16px;padding-top:12px;
+      border-top:1px solid var(--border-subtle)}
+    #lks-settings .danger-row button{margin-left:0}
     #lks-pill{position:fixed;right:12px;top:80px;z-index:999999;display:none;
       padding:6px 12px;border-radius:999px;font:12px system-ui;cursor:pointer;
       background:#0a66c2;color:#fff;border:1px solid #084d92;
@@ -952,10 +957,14 @@
         <input id="s-scrollMinMs" type="number"/><input id="s-scrollMaxMs" type="number"/>
         <label>Batch size</label><input id="s-batchSize" type="number"/>
         <label>Max posts per session</label><input id="s-maxPosts" type="number"/>
-        <button id="s-save" class="primary">Save</button>
-        <button id="s-cancel">Cancel</button>
-        <button id="s-rescore">Rescore stored</button>
-        <button id="s-clear" class="danger">Clear DB (irreversible)</button>
+        <div class="actions-row">
+          <button id="s-save" class="primary">Save</button>
+          <button id="s-cancel">Cancel</button>
+          <button id="s-rescore">Rescore stored</button>
+        </div>
+        <div class="danger-row">
+          <button id="s-clear" class="danger">Clear DB (irreversible)</button>
+        </div>
       </div>`;
     document.body.append(panel);
     const $ = id => panel.querySelector('#' + id);
