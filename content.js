@@ -799,6 +799,7 @@
       border-top:1px solid var(--border-subtle);border-bottom:1px solid var(--border-subtle)}
     #lks-panel .counters{padding:6px 12px;font-size:11px;color:var(--muted-2);display:flex;gap:12px;
       border-bottom:1px solid var(--border-subtle)}
+    #lks-panel .counters span{cursor:help;text-decoration:underline dotted;text-decoration-color:var(--muted)}
     #lks-panel .hint{padding:10px 12px;font-size:12px;color:var(--hint-fg);background:var(--hint-bg);
       border-bottom:1px solid var(--border-subtle);line-height:1.45}
     #lks-panel .history-controls{display:flex;flex-direction:column;gap:4px;
@@ -1015,7 +1016,7 @@
       row.dataset.score = p.score;
       if (p.status === 'dismissed') row.classList.add('dismissed');
       row.innerHTML = `
-        <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
+        <div><span class="score" title="LLM-assigned relevance score 0–10 against your active criteria."></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
@@ -1112,9 +1113,21 @@
       $('s-criteria').value = CFG.criteria;
       setStatus(`Profile: ${profiles.activeName}`);
     };
+    // Settings opens as a full-panel overlay: hide body + history while
+    // it's up so the form fields aren't crammed below the result list.
+    // Close (Save / Cancel) restores whichever body was active.
     $('lks-cog').onclick = () => {
       const s = $('lks-settings');
-      s.style.display = s.style.display === 'none' ? 'block' : 'none';
+      const opening = s.style.display === 'none' || !s.style.display;
+      if (opening) {
+        s.style.display = 'block';
+        $('lks-body').style.display = 'none';
+        $('lks-history').style.display = 'none';
+      } else {
+        s.style.display = 'none';
+        $('lks-body').style.display = historyMode ? 'none' : '';
+        $('lks-history').style.display = historyMode ? '' : 'none';
+      }
     };
     $('s-save').onclick = () => {
       // Criteria belongs to the active profile, not the global CFG bucket.
@@ -1134,11 +1147,15 @@
       SAVE('batchSize', Number.parseInt($('s-batchSize').value, 10) || 8);
       SAVE('maxPosts', Number.parseInt($('s-maxPosts').value, 10) || 1500);
       $('lks-settings').style.display = 'none';
+      $('lks-body').style.display = historyMode ? 'none' : '';
+      $('lks-history').style.display = historyMode ? '' : 'none';
       setStatus('Settings saved.');
     };
     $('s-cancel').onclick = () => {
       sync();
       $('lks-settings').style.display = 'none';
+      $('lks-body').style.display = historyMode ? 'none' : '';
+      $('lks-history').style.display = historyMode ? '' : 'none';
       setStatus('Settings unchanged.');
     };
     $('s-rescore').onclick = () => rescoreAll();
@@ -1243,16 +1260,22 @@
     // this session, so evicted posts only re-render via the boot history
     // loop on a future page load.
     const MAX_PANEL_RESULTS = 200;
-    function addResult(post) {
+    function addResult(post, silent = false) {
       if (rendered.has(post.urn)) return;
       rendered.add(post.urn);
-      if (!post.borderline) bump('hits', 1);
+      // silent=true is used by the boot history loop to render past hits
+      // visually without claiming they happened in this session — the
+      // counter row should reflect THIS session's activity, not a
+      // backfilled "you have 50 hits already" surprise on every page
+      // load. Live encounters via tryCapture and freshly-scored batches
+      // bump as before.
+      if (!silent && !post.borderline) bump('hits', 1);
       const div = document.createElement('div');
       div.dataset.urn = post.urn;
       div.dataset.score = post.score;
       div.className = post.borderline ? 'result borderline' : 'result';
       div.innerHTML = `
-        <div><span class="score"></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
+        <div><span class="score" title="LLM-assigned relevance score 0–10 against your active criteria."></span><span class="author"></span><button class="dismiss" title="Dismiss this result">×</button></div>
         <div class="reason"></div>
         <div class="snippet"></div>
         <a target="_blank">Open on LinkedIn →</a>`;
@@ -1293,10 +1316,13 @@
       : CFG.scoreThresh;
     const past = await dbAllScored(lowerBound);
     for (const p of past.filter(x => x.status !== 'dismissed').slice(0, 50)) {
-      // Bump `scored` for each past hit we surface so the panel invariant
-      // hits ≤ scored holds at boot before any fresh scoring runs.
-      ui.bump('scored', 1);
-      ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true });
+      // Render past hits visually but DO NOT bump session counters.
+      // The counter row reflects this-session activity; the user found
+      // \"scored 52, hits 51\" right after a fresh F5 confusing because
+      // they hadn't done anything yet. Live encounters via tryCapture
+      // still bump scored/hits, so the invariant holds within the
+      // session — the boot rendering is purely visual rehydration.
+      ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true }, true);
     }
     const anyStored = await dbAllScored(0);
     if (anyStored.length === 0) ui.showHint();
@@ -1311,8 +1337,14 @@
       setTimeout(() => startScroll(), 1500);
     } else {
       ui.setStatus(queuedFromDisk.length > 0
-        ? `Ready. ${queuedFromDisk.length} carried over — click Start.`
+        ? `Ready. Draining ${queuedFromDisk.length} carried over…`
         : 'Ready. Click Start.');
+      // Auto-drain carryover queue without waiting for the user to
+      // click Start. The visibility listener doesn't fire on initial
+      // load (visibility was already 'visible'), so without this kick
+      // the counter sits at e.g. \"queued 9\" until the user does
+      // something — looks broken.
+      if (queuedFromDisk.length > 0) maybeFlush(true);
     }
   })();
 })();
