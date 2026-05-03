@@ -47,7 +47,7 @@
     scrollMinMs: 5000,
     scrollMaxMs: 10000,
     batchSize: 4,
-    maxPosts: 50,
+    maxPosts: 25,
     autoReloadOnCap: true,
     skipCompanyPosts: true,
   };
@@ -658,6 +658,34 @@
 
   // ---------- Scroller (human-like pacing) ----------
   let scrollTimer = null, lastH = 0, stable = 0, postsAtStart = 0, paused = false;
+  let backpressurePaused = false;
+  // Tunables for queue backpressure. Above HIGH the scroll loop hard-pauses
+  // until scoring drains the queue below LOW. Hysteresis prevents flapping
+  // when scoring just barely keeps up.
+  const QUEUE_HIGH_WATER = 100;
+  const QUEUE_LOW_WATER = 30;
+  // Heartbeat: write {ts, captured, queued, scored, articleCount} to
+  // localStorage every ~10 s. After a tab crash the boot block reads the
+  // heartbeat and shows the user the state at time of death — invaluable
+  // when "I don't know what happened, the tab just died" is all we have.
+  const HEARTBEAT_KEY = NS + 'heartbeat';
+  let lastHeartbeatTs = 0;
+  function writeHeartbeat() {
+    const now = Date.now();
+    if (now - lastHeartbeatTs < 10000) return;
+    lastHeartbeatTs = now;
+    try {
+      const cs = ui.getCounters();
+      localStorage.setItem(HEARTBEAT_KEY, JSON.stringify({
+        ts: now,
+        captured: cs.captured,
+        queued: cs.queued,
+        scored: cs.scored,
+        hits: cs.hits,
+        articleCount: document.querySelectorAll('article, [role="article"]').length,
+      }));
+    } catch { /* quota / private mode */ }
+  }
   function startScroll() {
     if (scrollTimer) return;
     // Resuming from a pause keeps the original maxPosts baseline so the
@@ -685,6 +713,30 @@
         scrollTimer = setTimeout(tick, 30000);
         return;
       }
+      // Backpressure: when scoring can't keep up with scrolling, the in-
+      // memory queue balloons (we've seen 700+ items, ~2 MB just in
+      // queued post bodies, plus all the LinkedIn DOM that shipped them).
+      // Scrolling further only makes it worse and contributes to OOM-ing
+      // the tab. Hard-pause scrolling above the high-water mark; resume
+      // automatically once scoring drains the queue below the low-water
+      // mark. No new captures during the wait, so this is a soft brake
+      // rather than a teardown.
+      if (queue.length >= QUEUE_HIGH_WATER && !backpressurePaused) {
+        backpressurePaused = true;
+        ui.setStatus(`Queue backed up (${queue.length}); pausing scroll until LLM drains it below ${QUEUE_LOW_WATER}…`);
+        scrollTimer = setTimeout(tick, 5000);
+        return;
+      }
+      if (backpressurePaused) {
+        if (queue.length > QUEUE_LOW_WATER) {
+          // Still too high; check again in 5s without scrolling.
+          scrollTimer = setTimeout(tick, 5000);
+          return;
+        }
+        backpressurePaused = false;
+        ui.setStatus(`Queue drained to ${queue.length}; resuming scroll.`);
+      }
+      writeHeartbeat();
       // The 2026-05 React rewrite moved scroll out of document.body into a
       // flex-grow <main>; window.scrollTo / body.scrollHeight are no-ops on
       // that DOM and the height-stable check trips after the initial render.
@@ -776,6 +828,7 @@
     clearTimeout(scrollTimer);
     scrollTimer = null;
     paused = true;
+    backpressurePaused = false;
     ui.setStatus('Paused.');
     ui.refreshControls();
     ui.setPillRunning(false);
@@ -784,6 +837,7 @@
     if (scrollTimer) clearTimeout(scrollTimer);
     scrollTimer = null;
     paused = false;
+    backpressurePaused = false;
     ui.setStatus('Stopped.');
     ui.refreshControls();
     ui.setPillRunning(false);
@@ -894,12 +948,13 @@
       background:#0a66c2;color:#fff;border:1px solid #084d92;
       box-shadow:0 4px 16px rgba(0,0,0,.18);user-select:none}
     #lks-pill:hover{background:#084d92}
-    #lks-pill.running{box-shadow:0 0 0 0 rgba(10,102,194,.6);animation:lks-pulse 1.6s infinite}
-    @keyframes lks-pulse{
-      0%{box-shadow:0 0 0 0 rgba(10,102,194,.6)}
-      70%{box-shadow:0 0 0 10px rgba(10,102,194,0)}
-      100%{box-shadow:0 0 0 0 rgba(10,102,194,0)}
-    }
+    /* Running indicator: a small green dot prefixed to the label. No CSS
+       keyframes — we used to pulse via box-shadow but that runs an
+       infinite GPU compositing loop on a fixed-position element, which
+       the tab carries the cost of even when minimized for hours. */
+    #lks-pill.running .pill-dot{background:#46d369}
+    #lks-pill .pill-dot{display:inline-block;width:8px;height:8px;border-radius:50%;
+      background:transparent;margin-right:6px;vertical-align:middle}
     #lks-pill .pill-hits{font-weight:700;margin-left:4px}
   `;
   const styleEl = document.createElement('style');
@@ -994,7 +1049,7 @@
     const pill = document.createElement('div');
     pill.id = 'lks-pill';
     pill.title = 'Linkshit — click to restore the panel';
-    pill.innerHTML = `Linkshit<span class="pill-hits">0</span>`;
+    pill.innerHTML = `<span class="pill-dot"></span>Linkshit<span class="pill-hits">0</span>`;
     document.body.append(pill);
     const pillHitsEl = pill.querySelector('.pill-hits');
     function setMinimized(on) {
@@ -1606,7 +1661,7 @@
     // the system actually has — instead of guessing whether their
     // saved settings drifted from the defaults shown in the UI.
     console.info('[linkshit] boot config:', {
-      version: '0.3.35',
+      version: '0.3.36',
       criteria: (CFG.criteria || '').slice(0, 120),
       keywords: CFG.keywords,
       authors: CFG.authors,
@@ -1617,6 +1672,22 @@
       batchSize: CFG.batchSize,
       maxPosts: CFG.maxPosts,
     });
+    // Post-crash diagnostic: if a heartbeat is on disk and was written
+    // recently (< 60 s ago), the previous session likely died without a
+    // clean shutdown — Chrome OOM-killed the tab, the user nuked it via
+    // task manager, etc. Surface what we knew about the state at that
+    // moment so the next session has data to work with instead of "the
+    // tab just died."
+    try {
+      const raw = localStorage.getItem(HEARTBEAT_KEY);
+      if (raw) {
+        const hb = JSON.parse(raw);
+        const ageS = Math.round((Date.now() - hb.ts) / 1000);
+        if (ageS >= 0 && ageS < 60 && localStorage.getItem(NS + 'resumeOnBoot') !== '1') {
+          console.warn('[linkshit] possible tab crash recovered. Last heartbeat:', hb, `(${ageS}s ago)`);
+        }
+      }
+    } catch { /* corrupt heartbeat, ignore */ }
     // Drain any queued-but-not-scored posts left over from a previous session
     // BEFORE starting the observer, so the observer can't race on the same
     // URN. seen.add prevents a later DOM re-encounter from re-queueing.

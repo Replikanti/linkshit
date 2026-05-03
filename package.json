@@ -1,6 +1,6 @@
 {
   "name": "linkshit",
-  "version": "0.3.35",
+  "version": "0.3.36",
   "description": "Linkshit — auto-scroll your LinkedIn feed and surface posts matching your criteria via a local LLM.",
   "main": "host.js",
   "scripts": {
