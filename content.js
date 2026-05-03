@@ -1200,11 +1200,14 @@
       $('lks-settings').style.display = 'none';
       $('lks-body').style.display = historyMode ? 'none' : '';
       $('lks-history').style.display = historyMode ? '' : 'none';
-      // Re-apply the threshold / borderline filters to the live panel:
-      // the settings change otherwise leaves stale cards (e.g. borderline
-      // cards visible after the user turns Show borderline off, or 5-6
-      // score cards still showing after raising threshold to 7).
-      rehydrateLivePanel().then(() => setStatus('Settings saved.'));
+      // Save updates configuration only — it does NOT re-render the
+      // live panel. Earlier we rehydrated from IDB after Save so users
+      // saw the new filter applied, but that ignored an explicit
+      // Clear All: the user empties the panel, opens Settings, hits
+      // Save, and old hits come back from history. New filter applies
+      // to subsequent captures; if the user wants a clean slate against
+      // the new filter, Clear All. Existing cards stay until they do.
+      setStatus('Settings saved.');
     };
     $('s-cancel').onclick = () => {
       sync();
