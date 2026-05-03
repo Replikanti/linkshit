@@ -272,11 +272,19 @@
     // LinkedIn →" lands somewhere relevant.
     const permaLink = el.querySelector('a[href*="/feed/update/"]') || el.querySelector('a[href*="/posts/"]');
     const url = permaLink?.href || authorLink.href;
+    // LinkedIn distinguishes personal posts (/in/<handle>) from company-
+    // page posts (/company/<handle>). The criteria language ("first-
+    // person stories", "founder posts", etc.) only makes sense for
+    // people; without telling the LLM about the kind it scores company
+    // marketing posts as if they were personal narratives. The
+    // authorKind makes that visible to the prompt.
+    const authorKind = authorLink.href.includes('/company/') ? 'company' : 'person';
     // Synthetic URN for IndexedDB key + dedup. Stable per (author, text).
     const urn = 'lks:' + djb2(authorLink.href + '|' + text.slice(0, 200));
     return {
       urn,
       author,
+      authorKind,
       subtitle,
       text,
       // Reactions count moved out of the public DOM in the 2026-05 rewrite.
