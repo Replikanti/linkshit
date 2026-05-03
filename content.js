@@ -801,8 +801,14 @@
         --shadow:0 4px 16px rgba(0,0,0,.5)}
     }
     #lks-panel header{padding:8px 12px;border-bottom:1px solid var(--border-subtle);font-weight:600;
-      display:flex;justify-content:space-between;align-items:center;cursor:move;
-      user-select:none}
+      display:flex;flex-direction:column;gap:6px;cursor:move;user-select:none}
+    #lks-panel header .hdr-row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+    #lks-panel header .btn-group{display:inline-flex;gap:0}
+    #lks-panel header .btn-group button{margin-left:0}
+    #lks-panel header .btn-group button + button{border-left:none}
+    #lks-panel header .btn-group button:first-child{border-top-right-radius:0;border-bottom-right-radius:0}
+    #lks-panel header .btn-group button:last-child{border-top-left-radius:0;border-bottom-left-radius:0}
+    #lks-panel header .btn-group button:not(:first-child):not(:last-child){border-radius:0}
     #lks-panel header button{cursor:pointer}
     #lks-panel header select{cursor:pointer;font:inherit;background:var(--field-bg);
       color:var(--fg);border:1px solid var(--field-border);border-radius:3px;padding:1px 4px}
@@ -862,16 +868,22 @@
     panel.innerHTML = `
       <div id="lks-resize"></div>
       <header>
-        <span><span id="lks-title" style="cursor:help;text-decoration:underline dotted">Linkshit</span><span id="lks-profile-wrap" style="display:none"> · Profile: <select id="lks-profile" title="Active profile"></select></span></span>
-        <span>
-          <button id="lks-start" class="primary">Start</button>
-          <button id="lks-pause">Pause</button>
-          <button id="lks-stop">Stop</button>
-          <button id="lks-history-toggle">History</button>
-          <button id="lks-export-btn" title="Download all stored hits as JSON.">Export</button>
-          <button id="lks-clear-btn" title="Empty the visible panel. History view still has everything in IDB.">Clear</button>
-          <button id="lks-cog">⚙</button>
-        </span>
+        <div class="hdr-row">
+          <span><span id="lks-title" style="cursor:help;text-decoration:underline dotted">Linkshit</span><span id="lks-profile-wrap" style="display:none"> · Profile: <select id="lks-profile" title="Active profile"></select></span></span>
+          <button id="lks-cog" title="Settings">⚙</button>
+        </div>
+        <div class="hdr-row">
+          <span class="btn-group">
+            <button id="lks-start" class="primary">Start</button>
+            <button id="lks-pause">Pause</button>
+            <button id="lks-stop">Stop</button>
+            <button id="lks-history-toggle">History</button>
+          </span>
+          <span class="btn-group">
+            <button id="lks-export-btn" title="Download all stored hits as JSON.">Export</button>
+            <button id="lks-clear-btn" title="Empty the visible panel. History view still has everything in IDB.">Clear All</button>
+          </span>
+        </div>
       </header>
       <div class="counters">
         <span title="Posts encountered this session (after dedup).">captured <b id="lks-c-captured">0</b></span>
