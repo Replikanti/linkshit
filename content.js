@@ -736,6 +736,12 @@
         maybeFlush(true);
         if (CFG.autoReloadOnCap) {
           localStorage.setItem(NS + 'resumeOnBoot', '1');
+          // Persist the counter row across the recycle. Without this
+          // every auto-reload zeroes captured/promoted/company/etc. and
+          // the user perceives the tab "losing progress" even though
+          // IDB is intact. Counters are session-cumulative, and the
+          // recycle is supposed to be invisible.
+          localStorage.setItem(NS + 'carryCounters', JSON.stringify(ui.getCounters()));
           ui.setStatus(`Recycling LinkedIn DOM (every ${CFG.maxPosts} posts) — refreshing tab in 5s, scrolling will auto-resume…`);
           setTimeout(() => globalThis.location.reload(), 5000);
         } else {
@@ -1365,7 +1371,17 @@
         last.remove();
       }
     }
-    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly };
+    function getCounters() { return { ...counters }; }
+    function setCounters(c) {
+      for (const k of Object.keys(counters)) {
+        if (typeof c[k] === 'number') {
+          counters[k] = c[k];
+          const el = $('lks-c-' + (k === 'tooOld' ? 'tooOld' : k));
+          if (el) el.textContent = String(c[k]);
+        }
+      }
+    }
+    return { setStatus, bump, setQueued, addResult, showHint, hideHint, refreshControls, clearResults, clearBodyOnly, getCounters, setCounters };
   })();
 
   // ---------- Live-panel rehydration ----------
@@ -1376,13 +1392,22 @@
   // threshold or toggles borderline off and expects the panel to
   // reflect the new filter immediately. Counter row is NOT bumped
   // (silent=true) — rehydration is purely visual.
+  // Heuristic for stored records that pre-date the authorKind field
+  // (#91): if the stored URL is a /company/ profile, treat as company.
+  // New records carry authorKind directly and get filtered cleanly.
+  function isCompanyAuthor(p) {
+    return p.authorKind === 'company' || (typeof p.url === 'string' && p.url.includes('/company/'));
+  }
   async function rehydrateLivePanel() {
     ui.clearBodyOnly();
     const lowerBound = CFG.showBorderline
       ? Math.max(0, CFG.scoreThresh - CFG.borderlineDelta)
       : CFG.scoreThresh;
     const past = await dbAllScored(lowerBound);
-    for (const p of past.filter(x => x.status !== 'dismissed').slice(0, 50)) {
+    for (const p of past
+      .filter(x => x.status !== 'dismissed')
+      .filter(x => !(CFG.skipCompanyPosts && isCompanyAuthor(x)))
+      .slice(0, 50)) {
       ui.addResult(p.score >= CFG.scoreThresh ? p : { ...p, borderline: true }, true);
     }
   }
@@ -1407,6 +1432,14 @@
     // the user sees a continuous capture session despite the reload.
     if (localStorage.getItem(NS + 'resumeOnBoot') === '1') {
       localStorage.removeItem(NS + 'resumeOnBoot');
+      // Restore the counter row from the pre-reload snapshot — auto-
+      // reload is meant to be transparent, so the user shouldn't see
+      // captured/promoted/etc. drop to 0 every recycle.
+      try {
+        const carry = JSON.parse(localStorage.getItem(NS + 'carryCounters') || 'null');
+        if (carry) ui.setCounters(carry);
+      } catch { /* malformed payload, fresh-start it */ }
+      localStorage.removeItem(NS + 'carryCounters');
       ui.setStatus('Resuming after DOM recycle…');
       // Wait a beat for the feed to mount and any queued posts to start
       // flowing through the observer; then kick scrolling.
