@@ -15,6 +15,21 @@
 (() => {
   'use strict';
 
+  // ---------- CPU mitigation: disable LinkedIn animations / transitions ----------
+  // LinkedIn ships an enormous amount of CSS animation: skeleton loaders,
+  // hover effects, content fade-ins, count-up odometers, scroll-driven
+  // ticker rotations, and so on. With auto-scroll continuously triggering
+  // new content mounts, dozens of animations run in parallel on the
+  // compositor + main thread. Injecting a near-zero animation/transition
+  // duration globally is a known SPA performance trick and routinely cuts
+  // CPU by a large fraction on visually busy sites. UX impact: transitions
+  // snap instead of fade, but everything still works.
+  const __cpuStyle = document.createElement('style');
+  __cpuStyle.id = 'linkshit-no-animations';
+  __cpuStyle.textContent = '*, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }';
+  const __mountStyle = () => { (document.head || document.documentElement).append(__cpuStyle); };
+  if (document.head) __mountStyle(); else document.addEventListener('DOMContentLoaded', __mountStyle, { once: true });
+
   // ---------- Config (persisted in localStorage) ----------
   const NS = 'linkshit.';
   const DEFAULTS = {
@@ -355,7 +370,13 @@
       ui.bump('scored', scored.length);
       ui.setStatus(scrollTimer ? 'Scrolling…' : 'Idle.');
     } catch (e) {
-      console.error('[Linkshit]', e);
+      // warn rather than error so transient Chrome MV3 service-worker
+      // lifecycle hiccups (cold-start sendMessage, port disconnected
+      // mid-batch as SW gets killed, etc.) don't badge the extension
+      // red on chrome://extensions. The bounded-retry / quotaPaused
+      // logic already handles real failures cleanly; the message stays
+      // visible in DevTools for genuine debugging.
+      console.warn('[Linkshit]', e);
       for (const p of batch) queue.unshift(p);
       if (e.code === 'quota_exhausted') {
         quotaPaused = true;
