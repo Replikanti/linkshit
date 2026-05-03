@@ -15,6 +15,21 @@
 (() => {
   'use strict';
 
+  // ---------- CPU mitigation: disable LinkedIn animations / transitions ----------
+  // LinkedIn ships an enormous amount of CSS animation: skeleton loaders,
+  // hover effects, content fade-ins, count-up odometers, scroll-driven
+  // ticker rotations, and so on. With auto-scroll continuously triggering
+  // new content mounts, dozens of animations run in parallel on the
+  // compositor + main thread. Injecting a near-zero animation/transition
+  // duration globally is a known SPA performance trick and routinely cuts
+  // CPU by a large fraction on visually busy sites. UX impact: transitions
+  // snap instead of fade, but everything still works.
+  const __cpuStyle = document.createElement('style');
+  __cpuStyle.id = 'linkshit-no-animations';
+  __cpuStyle.textContent = '*, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }';
+  const __mountStyle = () => { (document.head || document.documentElement).append(__cpuStyle); };
+  if (document.head) __mountStyle(); else document.addEventListener('DOMContentLoaded', __mountStyle, { once: true });
+
   // ---------- Config (persisted in localStorage) ----------
   const NS = 'linkshit.';
   const DEFAULTS = {
