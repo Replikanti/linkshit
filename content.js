@@ -918,8 +918,6 @@
         <button id="s-save" class="primary">Save</button>
         <button id="s-cancel">Cancel</button>
         <button id="s-rescore">Rescore stored</button>
-        <button id="s-export">Export JSON</button>
-        <button id="s-clear-panel">Clear panel</button>
         <button id="s-clear">Clear DB</button>
       </div>`;
     document.body.append(panel);
@@ -1204,10 +1202,7 @@
       setStatus('Settings unchanged.');
     };
     $('s-rescore').onclick = () => rescoreAll();
-    // Export and Clear-panel are also exposed in the header (lks-export-btn,
-    // lks-clear-btn) — the Settings entries are kept as a fallback for
-    // muscle-memory but the header is the primary discovery point.
-    const exportAll = async () => {
+    $('lks-export-btn').onclick = async () => {
       const all = await dbAllScored(0);
       const payload = {
         exported_at: new Date().toISOString(),
@@ -1235,18 +1230,12 @@
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       setStatus(`Exported ${all.length} posts.`);
     };
-    const clearPanel = () => {
+    $('lks-clear-btn').onclick = () => {
       $('lks-body').innerHTML = '';
       rendered.clear();
       counters.hits = 0;
       $('lks-c-hits').textContent = '0';
       setStatus('Panel cleared (IDB intact — see History).');
-    };
-    $('s-export').onclick = exportAll;
-    $('lks-export-btn').onclick = exportAll;
-    $('lks-clear-btn').onclick = clearPanel;
-    $('s-clear-panel').onclick = () => {
-      clearPanel();
     };
     $('s-clear').onclick = async () => {
       if (!confirm('Wipe all stored posts and scores?')) return;
